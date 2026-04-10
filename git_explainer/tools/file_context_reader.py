@@ -24,8 +24,8 @@ def read_file_at_revision(
         end_line: 1-indexed last line to include, inclusive (*None* = to end).
     """
     repo = Path(repo_path)
-    if not (repo / ".git").exists():
-        raise FileNotFoundError(f"Not a git repository: {repo}")
+    if not repo.is_dir() or not (repo / ".git").exists():
+        raise ValueError(f"Not a git repository: {repo}")
 
     if revision is None:
         content = _read_from_worktree(repo, file_path)
