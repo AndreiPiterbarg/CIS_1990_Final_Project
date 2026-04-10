@@ -12,14 +12,16 @@ def read_file_at_revision(
     start_line: int | None = None,
     end_line: int | None = None,
 ) -> str | None:
-    """Return file contents as a string, '[binary file]' for binaries, or None if missing.
+    """Return file contents as a string, ``"[binary file]"`` for binaries, or
+    ``None`` if the file does not exist.
 
     Args:
         repo_path: Path to the local git repository.
         file_path: File path relative to the repo root.
-        revision: Git revision (SHA, branch, tag, HEAD~N). None reads from working tree.
-        start_line: 1-indexed first line to include (None = from start).
-        end_line: 1-indexed last line to include (None = to end).
+        revision: Git revision (SHA, branch, tag, HEAD~N).  *None* reads from
+            the working tree.
+        start_line: 1-indexed first line to include (*None* = from start).
+        end_line: 1-indexed last line to include, inclusive (*None* = to end).
     """
     repo = Path(repo_path)
     if not (repo / ".git").exists():
