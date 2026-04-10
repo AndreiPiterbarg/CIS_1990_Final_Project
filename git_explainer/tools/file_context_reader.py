@@ -44,6 +44,8 @@ def read_file_at_revision(
     return content
 
 
+# --- Internal helpers --------------------------------------------------------
+
 def _read_from_worktree(repo: Path, file_path: str) -> str | None:
     target = repo / file_path
     if not target.exists():
@@ -61,10 +63,7 @@ def _read_from_revision(repo: Path, file_path: str, revision: str) -> str | None
         cwd=repo,
     )
     if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace")
-        if "does not exist" in stderr or "exists on disk, but not in" in stderr:
-            return None
-        raise ValueError(f"git show failed: {stderr.strip()}")
+        return None
     try:
         return result.stdout.decode("utf-8")
     except UnicodeDecodeError:
