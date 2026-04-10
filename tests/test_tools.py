@@ -681,3 +681,137 @@ class TestAnalyzeRange:
     def test_invalid_range_spec(self):
         with pytest.raises(ValueError, match="must contain"):
             analyze_range("/repo", "just_a_tag", include_prs=False, include_issues=False)
+
+
+# ---------------------------------------------------------------------------
+# file_context_reader
+# ---------------------------------------------------------------------------
+from git_explainer.tools.file_context_reader import read_file_at_revision
+
+
+class TestReadFileAtRevision:
+    """Tests for read_file_at_revision — all git calls are mocked."""
+
+    # -- worktree (revision=None) -------------------------------------------
+
+    def test_worktree_reads_utf8_file(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "hello.py").write_text("print('hi')\n", encoding="utf-8")
+
+        result = read_file_at_revision(tmp_path, "hello.py")
+        assert result == "print('hi')\n"
+
+    def test_worktree_missing_file_returns_none(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+
+        assert read_file_at_revision(tmp_path, "nope.py") is None
+
+    def test_worktree_binary_file_returns_sentinel(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "img.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00")
+
+        assert read_file_at_revision(tmp_path, "img.png") == "[binary file]"
+
+    # -- revision -----------------------------------------------------------
+
+    @patch("git_explainer.tools.file_context_reader.subprocess.run")
+    def test_revision_reads_file(self, mock_run, tmp_path):
+        (tmp_path / ".git").mkdir()
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=b"line1\nline2\nline3\n",
+        )
+
+        result = read_file_at_revision(tmp_path, "app.py", revision="abc123")
+        assert result == "line1\nline2\nline3\n"
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["git", "show", "abc123:app.py"]
+
+    @patch("git_explainer.tools.file_context_reader.subprocess.run")
+    def test_revision_missing_file_returns_none(self, mock_run, tmp_path):
+        (tmp_path / ".git").mkdir()
+        mock_run.return_value = MagicMock(
+            returncode=128,
+            stdout=b"",
+            stderr=b"fatal: path 'x.py' does not exist in 'abc123'",
+        )
+
+        assert read_file_at_revision(tmp_path, "x.py", revision="abc123") is None
+
+    @patch("git_explainer.tools.file_context_reader.subprocess.run")
+    def test_revision_invalid_revision_returns_none(self, mock_run, tmp_path):
+        (tmp_path / ".git").mkdir()
+        mock_run.return_value = MagicMock(
+            returncode=128,
+            stdout=b"",
+            stderr=b"fatal: invalid object name 'badrev'",
+        )
+
+        assert read_file_at_revision(tmp_path, "x.py", revision="badrev") is None
+
+    @patch("git_explainer.tools.file_context_reader.subprocess.run")
+    def test_revision_binary_file_returns_sentinel(self, mock_run, tmp_path):
+        (tmp_path / ".git").mkdir()
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=b"\x89PNG\r\n\x1a\n\x00\x00",
+        )
+
+        assert read_file_at_revision(tmp_path, "img.png", revision="abc123") == "[binary file]"
+
+    # -- line range ---------------------------------------------------------
+
+    def test_start_and_end_line(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "f.txt").write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
+
+        result = read_file_at_revision(tmp_path, "f.txt", start_line=2, end_line=4)
+        assert result == "b\nc\nd\n"
+
+    def test_start_line_only(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "f.txt").write_text("a\nb\nc\n", encoding="utf-8")
+
+        result = read_file_at_revision(tmp_path, "f.txt", start_line=2)
+        assert result == "b\nc\n"
+
+    def test_end_line_only(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "f.txt").write_text("a\nb\nc\n", encoding="utf-8")
+
+        result = read_file_at_revision(tmp_path, "f.txt", end_line=2)
+        assert result == "a\nb\n"
+
+    def test_line_range_beyond_file_length(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+
+        result = read_file_at_revision(tmp_path, "f.txt", start_line=5)
+        assert result == ""
+
+    def test_line_range_not_applied_to_binary(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "img.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00")
+
+        result = read_file_at_revision(tmp_path, "img.png", start_line=1, end_line=5)
+        assert result == "[binary file]"
+
+    def test_line_range_not_applied_to_none(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+
+        result = read_file_at_revision(tmp_path, "nope.py", start_line=1, end_line=5)
+        assert result is None
+
+    # -- repo validation ----------------------------------------------------
+
+    def test_invalid_repo_raises_valueerror(self, tmp_path):
+        bad = tmp_path / "not_a_repo"
+        bad.mkdir()
+
+        with pytest.raises(ValueError, match="Not a git repository"):
+            read_file_at_revision(bad, "f.txt")
+
+    def test_nonexistent_path_raises_valueerror(self):
+        with pytest.raises(ValueError, match="Not a git repository"):
+            read_file_at_revision("/no/such/path", "f.txt")
