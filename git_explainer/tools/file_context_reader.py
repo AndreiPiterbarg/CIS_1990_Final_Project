@@ -35,11 +35,11 @@ def read_file_at_revision(
     if content is None or content == "[binary file]":
         return content
 
-    if start_line is not None:
+    if start_line is not None or end_line is not None:
         lines = content.splitlines(keepends=True)
-        start = max(start_line - 1, 0)
-        lines = lines[start:end_line]
-        content = "".join(lines)
+        s = (start_line or 1) - 1
+        e = end_line or len(lines)
+        content = "".join(lines[s:e])
 
     return content
 
