@@ -37,6 +37,169 @@ class TestRunGit:
 
 
 # ---------------------------------------------------------------------------
+# git_blame_trace
+# ---------------------------------------------------------------------------
+from git_explainer.tools.git_blame_trace import get_blame, get_commit_detail, get_commit_log
+
+# Sample porcelain blame output (two lines attributed to different commits)
+PORCELAIN_BLAME = dedent("""\
+    a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2 10 10 1
+    author Alice
+    author-mail <alice@example.com>
+    author-time 1700000000
+    author-tz +0000
+    committer Alice
+    committer-mail <alice@example.com>
+    committer-time 1700000000
+    committer-tz +0000
+    summary Initial commit
+    filename src/app.py
+    \tdef hello():
+    b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3 11 11 1
+    author Bob
+    author-mail <bob@example.com>
+    author-time 1700100000
+    author-tz +0000
+    committer Bob
+    committer-mail <bob@example.com>
+    committer-time 1700100000
+    committer-tz +0000
+    summary Add greeting
+    filename src/app.py
+    \t    return "hi"
+""")
+
+COMMIT_LOG_OUTPUT = dedent("""\
+    abc1234|Alice|2024-06-15|Add greeting
+    def5678|Bob|2024-06-01|Initial commit
+""")
+
+COMMIT_SHOW_OUTPUT = dedent("""\
+    commit abc1234
+    Author: Alice <alice@example.com>
+    Date:   Sat Jun 15 12:00:00 2024 +0000
+
+        Add greeting
+
+    diff --git a/src/app.py b/src/app.py
+    --- a/src/app.py
+    +++ b/src/app.py
+    @@ -1 +1,2 @@
+     def hello():
+    +    return "hi"
+""")
+
+
+class TestGetBlame:
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_full_file_blame(self, mock_git):
+        mock_git.return_value = PORCELAIN_BLAME
+        result = get_blame("/repo", "src/app.py")
+
+        mock_git.assert_called_once_with("/repo", ["blame", "--porcelain", "src/app.py"])
+        assert len(result) == 2
+
+        assert result[0]["sha"] == "a1b2c3d"
+        assert result[0]["author"] == "Alice"
+        assert result[0]["date"] == "2023-11-14"
+        assert result[0]["line"] == 10
+        assert result[0]["content"] == "def hello():"
+
+        assert result[1]["sha"] == "b2c3d4e"
+        assert result[1]["author"] == "Bob"
+        assert result[1]["date"] == "2023-11-16"
+        assert result[1]["line"] == 11
+        assert result[1]["content"] == '    return "hi"'
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_line_range(self, mock_git):
+        mock_git.return_value = PORCELAIN_BLAME
+        get_blame("/repo", "src/app.py", start_line=10, end_line=20)
+
+        mock_git.assert_called_once_with(
+            "/repo", ["blame", "--porcelain", "-L10,20", "src/app.py"]
+        )
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_single_line(self, mock_git):
+        mock_git.return_value = PORCELAIN_BLAME
+        get_blame("/repo", "src/app.py", start_line=10)
+
+        mock_git.assert_called_once_with(
+            "/repo", ["blame", "--porcelain", "-L10,10", "src/app.py"]
+        )
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_empty_output(self, mock_git):
+        mock_git.return_value = ""
+        assert get_blame("/repo", "empty.py") == []
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_untracked_file_raises(self, mock_git):
+        mock_git.side_effect = ValueError("fatal: no such path 'nope.py'")
+        with pytest.raises(ValueError, match="no such path"):
+            get_blame("/repo", "nope.py")
+
+
+class TestGetCommitLog:
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_default_log(self, mock_git):
+        mock_git.return_value = COMMIT_LOG_OUTPUT
+        result = get_commit_log("/repo", "src/app.py")
+
+        mock_git.assert_called_once_with("/repo", [
+            "log", "--format=%h|%an|%ad|%s", "--date=short", "-n10", "--", "src/app.py"
+        ])
+        assert len(result) == 2
+        assert result[0] == {
+            "sha": "abc1234", "author": "Alice",
+            "date": "2024-06-15", "message": "Add greeting",
+        }
+        assert result[1] == {
+            "sha": "def5678", "author": "Bob",
+            "date": "2024-06-01", "message": "Initial commit",
+        }
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_custom_max_count(self, mock_git):
+        mock_git.return_value = "abc1234|Alice|2024-06-15|msg\n"
+        get_commit_log("/repo", "f.py", max_count=5)
+
+        mock_git.assert_called_once_with("/repo", [
+            "log", "--format=%h|%an|%ad|%s", "--date=short", "-n5", "--", "f.py"
+        ])
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_pipe_in_message(self, mock_git):
+        mock_git.return_value = "abc1234|Alice|2024-06-15|fix: a|b edge case\n"
+        result = get_commit_log("/repo", "f.py")
+
+        assert result[0]["message"] == "fix: a|b edge case"
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_empty_log(self, mock_git):
+        mock_git.return_value = ""
+        assert get_commit_log("/repo", "f.py") == []
+
+
+class TestGetCommitDetail:
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_returns_raw_output(self, mock_git):
+        mock_git.return_value = COMMIT_SHOW_OUTPUT
+        result = get_commit_detail("/repo", "abc1234")
+
+        mock_git.assert_called_once_with("/repo", ["show", "abc1234"])
+        assert "Add greeting" in result
+        assert 'return "hi"' in result
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_invalid_sha_raises(self, mock_git):
+        mock_git.side_effect = ValueError("fatal: bad object deadbeef")
+        with pytest.raises(ValueError, match="bad object"):
+            get_commit_detail("/repo", "deadbeef")
+
+
+# ---------------------------------------------------------------------------
 # git_diff_reader
 # ---------------------------------------------------------------------------
 from git_explainer.tools.git_diff_reader import get_diff, get_diff_stats
