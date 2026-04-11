@@ -6,6 +6,7 @@ from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 # ---------------------------------------------------------------------------
 # git_utils
@@ -815,3 +816,170 @@ class TestReadFileAtRevision:
     def test_nonexistent_path_raises_valueerror(self):
         with pytest.raises(ValueError, match="Not a git repository"):
             read_file_at_revision("/no/such/path", "f.txt")
+
+
+# ---------------------------------------------------------------------------
+# github_issue_lookup
+# ---------------------------------------------------------------------------
+from git_explainer.tools.github_issue_lookup import (
+    extract_issue_refs,
+    fetch_issue,
+    fetch_issues,
+)
+
+SAMPLE_ISSUE_JSON = {
+    "number": 42,
+    "title": "Bug: login fails",
+    "state": "open",
+    "body": "Steps to reproduce...",
+    "labels": [{"name": "bug"}, {"name": "high-priority"}],
+    "created_at": "2024-06-01T10:00:00Z",
+    "user": {"login": "octocat"},
+    # extra fields the API returns that we should ignore
+    "id": 999999,
+    "html_url": "https://github.com/octocat/hello/issues/42",
+}
+
+
+class TestFetchIssue:
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_success(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = SAMPLE_ISSUE_JSON
+        mock_get.return_value = mock_resp
+
+        result = fetch_issue("octocat", "hello", 42)
+
+        mock_get.assert_called_once_with(
+            "https://api.github.com/repos/octocat/hello/issues/42",
+            headers={
+                "Authorization": mock_get.call_args[1]["headers"]["Authorization"],
+                "Accept": "application/vnd.github.v3+json",
+            },
+            timeout=10,
+        )
+        assert result == {
+            "number": 42,
+            "title": "Bug: login fails",
+            "state": "open",
+            "body": "Steps to reproduce...",
+            "labels": ["bug", "high-priority"],
+            "created_at": "2024-06-01T10:00:00Z",
+            "user": "octocat",
+        }
+
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_null_body_becomes_empty_string(self, mock_get):
+        data = {**SAMPLE_ISSUE_JSON, "body": None}
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = data
+        mock_get.return_value = mock_resp
+
+        result = fetch_issue("o", "r", 1)
+        assert result["body"] == ""
+
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_404_returns_none(self, mock_get):
+        mock_get.return_value = MagicMock(status_code=404)
+
+        assert fetch_issue("o", "r", 999) is None
+
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_401_raises(self, mock_get):
+        mock_get.return_value = MagicMock(status_code=401)
+
+        with pytest.raises(requests.HTTPError, match="auth error"):
+            fetch_issue("o", "r", 1)
+
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_403_raises(self, mock_get):
+        mock_get.return_value = MagicMock(status_code=403)
+
+        with pytest.raises(requests.HTTPError, match="auth error"):
+            fetch_issue("o", "r", 1)
+
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_429_raises(self, mock_get):
+        mock_get.return_value = MagicMock(status_code=429)
+
+        with pytest.raises(requests.HTTPError, match="rate limit"):
+            fetch_issue("o", "r", 1)
+
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_500_raises_via_raise_for_status(self, mock_get):
+        mock_resp = MagicMock(status_code=500)
+        mock_resp.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
+        mock_get.return_value = mock_resp
+
+        with pytest.raises(requests.HTTPError, match="500"):
+            fetch_issue("o", "r", 1)
+
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_empty_labels(self, mock_get):
+        data = {**SAMPLE_ISSUE_JSON, "labels": []}
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = data
+        mock_get.return_value = mock_resp
+
+        result = fetch_issue("o", "r", 42)
+        assert result["labels"] == []
+
+
+class TestExtractIssueRefs:
+    def test_bare_ref(self):
+        assert extract_issue_refs("related to #42") == [42]
+
+    def test_fixes_keyword(self):
+        assert extract_issue_refs("fixes #7") == [7]
+
+    def test_closes_keyword(self):
+        assert extract_issue_refs("Closes #100") == [100]
+
+    def test_resolves_keyword(self):
+        assert extract_issue_refs("Resolved #5") == [5]
+
+    def test_multiple_refs(self):
+        result = extract_issue_refs("fixes #1, closes #2, see #3")
+        assert result == [1, 2, 3]
+
+    def test_deduplication_preserves_order(self):
+        result = extract_issue_refs("#5 and #3 and #5 again")
+        assert result == [5, 3]
+
+    def test_case_insensitive(self):
+        assert extract_issue_refs("FIXES #10") == [10]
+
+    def test_no_refs(self):
+        assert extract_issue_refs("just a normal commit message") == []
+
+    def test_fixed_variant(self):
+        assert extract_issue_refs("Fixed #9") == [9]
+
+    def test_standalone_hash(self):
+        assert extract_issue_refs("#123") == [123]
+
+
+class TestFetchIssues:
+    @patch("git_explainer.tools.github_issue_lookup.fetch_issue")
+    def test_returns_found_issues(self, mock_fetch):
+        issue1 = {"number": 1, "title": "A"}
+        issue2 = {"number": 2, "title": "B"}
+        mock_fetch.side_effect = [issue1, issue2]
+
+        result = fetch_issues("o", "r", [1, 2])
+        assert result == [issue1, issue2]
+
+    @patch("git_explainer.tools.github_issue_lookup.fetch_issue")
+    def test_skips_missing_issues(self, mock_fetch):
+        issue1 = {"number": 1, "title": "A"}
+        mock_fetch.side_effect = [issue1, None]
+
+        result = fetch_issues("o", "r", [1, 999])
+        assert result == [issue1]
+
+    @patch("git_explainer.tools.github_issue_lookup.fetch_issue")
+    def test_empty_list(self, mock_fetch):
+        result = fetch_issues("o", "r", [])
+        assert result == []
+        mock_fetch.assert_not_called()
