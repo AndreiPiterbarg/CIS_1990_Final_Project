@@ -1,13 +1,12 @@
 """Fetch GitHub pull-request data via the REST API."""
 
+import time
+
 import requests
 
-from git_explainer.config import GITHUB_TOKEN, GITHUB_API_BASE
+from git_explainer.config import GITHUB_API_BASE, github_headers
 
-_HEADERS = {
-    "Authorization": f"token {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github.v3+json",
-}
+_HEADERS = github_headers()
 
 
 def _handle_response(resp: requests.Response) -> requests.Response | None:
@@ -27,7 +26,7 @@ def _handle_response(resp: requests.Response) -> requests.Response | None:
 def fetch_pr(owner: str, repo: str, pr_number: int) -> dict | None:
     """Fetch a single pull request. Returns None if not found."""
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}"
-    resp = _handle_response(requests.get(url, headers=_HEADERS))
+    resp = _handle_response(_get(url))
     if resp is None:
         return None
     data = resp.json()
@@ -49,7 +48,7 @@ def fetch_pr(owner: str, repo: str, pr_number: int) -> dict | None:
 def fetch_pr_comments(owner: str, repo: str, pr_number: int) -> list[dict]:
     """Fetch review comments on a PR (first page, up to 30)."""
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/comments"
-    resp = _handle_response(requests.get(url, headers=_HEADERS))
+    resp = _handle_response(_get(url))
     if resp is None:
         return []
     return [
@@ -66,7 +65,19 @@ def fetch_pr_comments(owner: str, repo: str, pr_number: int) -> list[dict]:
 def find_prs_for_commit(owner: str, repo: str, sha: str) -> list[int]:
     """Find which PR(s) a commit belongs to. Returns list of PR numbers."""
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/pulls"
-    resp = _handle_response(requests.get(url, headers=_HEADERS))
+    resp = _handle_response(_get(url))
     if resp is None:
         return []
     return [pr["number"] for pr in resp.json()]
+
+
+def _get(url: str, *, retries: int = 3) -> requests.Response:
+    """Make a GitHub GET request with lightweight backoff on rate limiting."""
+    response: requests.Response | None = None
+    for attempt in range(retries):
+        response = requests.get(url, headers=_HEADERS, timeout=10)
+        if response.status_code not in (403, 429) or attempt == retries - 1:
+            return response
+        time.sleep(2 ** attempt)
+    assert response is not None
+    return response

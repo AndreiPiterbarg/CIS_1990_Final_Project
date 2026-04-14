@@ -40,7 +40,12 @@ class TestRunGit:
 # ---------------------------------------------------------------------------
 # git_blame_trace
 # ---------------------------------------------------------------------------
-from git_explainer.tools.git_blame_trace import get_blame, get_commit_detail, get_commit_log
+from git_explainer.tools.git_blame_trace import (
+    get_blame,
+    get_commit_detail,
+    get_commit_log,
+    trace_line_history,
+)
 
 # Sample porcelain blame output (two lines attributed to different commits)
 PORCELAIN_BLAME = dedent("""\
@@ -198,6 +203,43 @@ class TestGetCommitDetail:
         mock_git.side_effect = ValueError("fatal: bad object deadbeef")
         with pytest.raises(ValueError, match="bad object"):
             get_commit_detail("/repo", "deadbeef")
+
+
+class TestTraceLineHistory:
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_traces_commits_for_line_range(self, mock_git):
+        mock_git.return_value = dedent("""\
+            abc1234567890abc|Alice|2024-06-15|Add greeting
+            abc1234567890abc|Alice|2024-06-15|Add greeting
+            def5678901234def|Bob|2024-06-01|Initial commit
+        """)
+
+        result = trace_line_history("/repo", "src/app.py", 10, 12, max_count=5)
+
+        mock_git.assert_called_once_with("/repo", [
+            "log",
+            "-L10,12:src/app.py",
+            "--format=%H|%an|%ad|%s",
+            "--date=short",
+            "--no-patch",
+            "-n5",
+        ])
+        assert result == [
+            {
+                "sha": "abc1234",
+                "full_sha": "abc1234567890abc",
+                "author": "Alice",
+                "date": "2024-06-15",
+                "message": "Add greeting",
+            },
+            {
+                "sha": "def5678",
+                "full_sha": "def5678901234def",
+                "author": "Bob",
+                "date": "2024-06-01",
+                "message": "Initial commit",
+            },
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +866,7 @@ class TestReadFileAtRevision:
 from git_explainer.tools.github_issue_lookup import (
     extract_issue_refs,
     fetch_issue,
+    fetch_issue_comments,
     fetch_issues,
 )
 
@@ -983,3 +1026,27 @@ class TestFetchIssues:
         result = fetch_issues("o", "r", [])
         assert result == []
         mock_fetch.assert_not_called()
+
+
+class TestFetchIssueComments:
+    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    def test_returns_issue_comments(self, mock_get):
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = [
+            {
+                "user": {"login": "octocat"},
+                "body": "I hit this too",
+                "created_at": "2024-06-01T10:00:00Z",
+            }
+        ]
+        mock_get.return_value = mock_resp
+
+        result = fetch_issue_comments("octocat", "hello", 42)
+
+        assert result == [
+            {
+                "user": "octocat",
+                "body": "I hit this too",
+                "created_at": "2024-06-01T10:00:00Z",
+            }
+        ]
