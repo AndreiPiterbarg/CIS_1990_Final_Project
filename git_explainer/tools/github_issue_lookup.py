@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import re
+import time
 
 import requests
 
-from git_explainer.config import GITHUB_API_BASE, GITHUB_TOKEN
+from git_explainer.config import GITHUB_API_BASE, github_headers
 
-_HEADERS: dict[str, str] = {
-    "Authorization": f"token {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github.v3+json",
-}
+_HEADERS: dict[str, str] = github_headers()
 
 _ISSUE_RE = re.compile(
     r"(?:(?:fix(?:es|ed)?|clos(?:es|ed)?|resolv(?:es|ed)?|related\s+to)\s+)?#(\d+)",
@@ -24,7 +22,7 @@ def fetch_issue(
 ) -> dict[str, str | int | list[str]] | None:
     """Fetch a single GitHub issue by number. Returns None if not found."""
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}"
-    resp = requests.get(url, headers=_HEADERS, timeout=10)
+    resp = _get(url)
 
     if resp.status_code == 404:
         return None
@@ -51,6 +49,23 @@ def fetch_issue(
     }
 
 
+def fetch_issue_comments(owner: str, repo: str, issue_number: int) -> list[dict[str, str]]:
+    """Fetch issue comments (first page, up to 30)."""
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    resp = _get(url)
+    if resp.status_code == 404:
+        return []
+    resp.raise_for_status()
+    return [
+        {
+            "user": comment["user"]["login"],
+            "body": comment["body"],
+            "created_at": comment["created_at"],
+        }
+        for comment in resp.json()
+    ]
+
+
 def extract_issue_refs(text: str) -> list[int]:
     """Extract deduplicated issue numbers from a commit message."""
     return list(dict.fromkeys(int(m) for m in _ISSUE_RE.findall(text)))
@@ -68,3 +83,15 @@ def fetch_issues(
         if issue is not None:
             results.append(issue)
     return results
+
+
+def _get(url: str, *, retries: int = 3) -> requests.Response:
+    """Make a GitHub GET request with lightweight backoff on rate limiting."""
+    response: requests.Response | None = None
+    for attempt in range(retries):
+        response = requests.get(url, headers=_HEADERS, timeout=10)
+        if response.status_code not in (403, 429) or attempt == retries - 1:
+            return response
+        time.sleep(2 ** attempt)
+    assert response is not None
+    return response

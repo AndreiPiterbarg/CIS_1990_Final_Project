@@ -69,3 +69,40 @@ def get_commit_log(
 def get_commit_detail(repo_path: str, sha: str) -> str:
     """Return the full diff and message for a single commit."""
     return run_git(repo_path, ["show", sha]).strip()
+
+
+def trace_line_history(
+    repo_path: str,
+    file_path: str,
+    start_line: int,
+    end_line: int,
+    *,
+    max_count: int = 5,
+) -> list[dict[str, str]]:
+    """Trace the commit history for a line range using ``git log -L``."""
+    output = run_git(repo_path, [
+        "log",
+        f"-L{start_line},{end_line}:{file_path}",
+        "--format=%H|%an|%ad|%s",
+        "--date=short",
+        "--no-patch",
+        f"-n{max_count}",
+    ])
+
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for line in output.strip().splitlines():
+        if not line or "|" not in line:
+            continue
+        sha, author, date, message = line.split("|", 3)
+        if sha in seen:
+            continue
+        seen.add(sha)
+        entries.append({
+            "sha": sha[:7],
+            "full_sha": sha,
+            "author": author,
+            "date": date,
+            "message": message,
+        })
+    return entries
