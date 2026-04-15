@@ -19,6 +19,7 @@ def _default_payload() -> dict[str, Any]:
         "issues": {},
         "issue_comments": {},
         "contexts": {},
+        "diffs": {},
     }
 
 
@@ -76,6 +77,12 @@ class ExplainerMemory:
 
     def set_context(self, key: str, context: str) -> None:
         self._set("contexts", key, context)
+
+    def get_diff(self, key: str) -> dict | None:
+        return self._get("diffs", key)
+
+    def set_diff(self, key: str, diff_data: dict) -> None:
+        self._set("diffs", key, diff_data)
 
     def flush(self) -> None:
         if not self._dirty:
