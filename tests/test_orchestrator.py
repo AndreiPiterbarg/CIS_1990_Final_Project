@@ -23,6 +23,7 @@ def _make_query(tmp_path: Path) -> ExplainerQuery:
     )
 
 
+@patch("git_explainer.orchestrator.get_diff")
 @patch("git_explainer.orchestrator.read_file_at_revision")
 @patch("git_explainer.orchestrator.fetch_issue_comments")
 @patch("git_explainer.orchestrator.fetch_issue")
@@ -40,6 +41,7 @@ def test_agent_collects_evidence_and_uses_fallback(
     mock_fetch_issue,
     mock_fetch_issue_comments,
     mock_read_file,
+    mock_get_diff,
     tmp_path,
 ):
     query = _make_query(tmp_path)
@@ -54,6 +56,11 @@ def test_agent_collects_evidence_and_uses_fallback(
     mock_fetch_issue.return_value = {"number": 7, "title": "Parser bug", "body": "Broken edge case", "state": "open"}
     mock_fetch_issue_comments.return_value = [{"user": "maintainer", "body": "Please patch soon"}]
     mock_read_file.return_value = "surrounding context"
+    mock_get_diff.return_value = {
+        "files": [{"hunks": [{"header": "@@ -1,3 +1,4 @@", "lines": [
+            {"type": "add", "content": "new line", "old_line": None, "new_line": 2},
+        ]}]}],
+    }
 
     result = GitExplainerAgent(use_llm=False).explain(query)
 
@@ -61,11 +68,13 @@ def test_agent_collects_evidence_and_uses_fallback(
     assert len(result["pull_requests"]) == 1
     assert len(result["issues"]) == 1
     assert len(result["file_contexts"]) == 2
+    assert len(result["diffs"]) >= 1
     assert "[commit:abc1234]" in result["explanation"]["summary"]
     assert "[pr:#42]" in result["explanation"]["why"]
     assert "[issue:#7]" in result["explanation"]["why"]
 
 
+@patch("git_explainer.orchestrator.get_diff")
 @patch("git_explainer.orchestrator.read_file_at_revision")
 @patch("git_explainer.orchestrator.fetch_pr_comments")
 @patch("git_explainer.orchestrator.fetch_pr")
@@ -79,6 +88,7 @@ def test_agent_reuses_cache_across_runs(
     mock_fetch_pr,
     mock_fetch_pr_comments,
     mock_read_file,
+    mock_get_diff,
     tmp_path,
 ):
     query = _make_query(tmp_path)
@@ -90,6 +100,7 @@ def test_agent_reuses_cache_across_runs(
     mock_fetch_pr.return_value = {"number": 42, "title": "Improve parser", "body": "", "state": "merged"}
     mock_fetch_pr_comments.return_value = []
     mock_read_file.return_value = "context"
+    mock_get_diff.return_value = {"files": []}
 
     agent = GitExplainerAgent(use_llm=False)
     agent.explain(query)
@@ -98,3 +109,4 @@ def test_agent_reuses_cache_across_runs(
     assert mock_find_prs.call_count == 1
     assert mock_fetch_pr.call_count == 1
     assert mock_fetch_pr_comments.call_count == 1
+    assert mock_get_diff.call_count == 1
