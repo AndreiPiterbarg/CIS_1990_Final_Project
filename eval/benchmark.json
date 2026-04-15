@@ -1,1 +1,212 @@
-[]
+[
+  {
+    "id": "config-groq-switch",
+    "description": "Config lines touched by multiple authors when LLM provider switched from Kimi to Groq",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/config.py",
+    "start_line": 13,
+    "end_line": 19,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 2,
+      "commit_message_contains": ["Switch LLM provider", "initial mockup"],
+      "pr_numbers": [1],
+      "issue_numbers": [],
+      "explanation_contains": ["config.py", "[commit:"],
+      "used_fallback": true
+    },
+    "tags": ["multi-commit", "multi-author", "fallback"]
+  },
+  {
+    "id": "file-reader-revision-fix",
+    "description": "Lines in _read_from_revision touched by a bug-fix commit and the original add",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/tools/file_context_reader.py",
+    "start_line": 59,
+    "end_line": 70,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 2,
+      "commit_message_contains": ["Simplify _read_from_revision", "Add git tools"],
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["file_context_reader.py", "[commit:"],
+      "used_fallback": true
+    },
+    "tags": ["multi-commit", "bug-fix", "fallback"]
+  },
+  {
+    "id": "line-range-slice-fix",
+    "description": "Line range slicing fix — a targeted bug-fix with descriptive commit message",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/tools/file_context_reader.py",
+    "start_line": 38,
+    "end_line": 42,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 2,
+      "commit_message_contains": ["Fix line range slicing"],
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["file_context_reader.py", "[commit:"],
+      "used_fallback": true
+    },
+    "tags": ["bug-fix", "fallback"]
+  },
+  {
+    "id": "issue-regex-single-commit",
+    "description": "Single commit adding the issue-reference regex — tests single-commit scenario",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/tools/github_issue_lookup.py",
+    "start_line": 12,
+    "end_line": 16,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["Add GitHub issue and PR lookup"],
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["github_issue_lookup.py", "[commit:"],
+      "used_fallback": true
+    },
+    "tags": ["single-commit", "fallback"]
+  },
+  {
+    "id": "guardrails-generic-msg",
+    "description": "Generic-message regex triggers should_fetch_file_context — tests generic commit message heuristic",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/guardrails.py",
+    "start_line": 15,
+    "end_line": 19,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["initial mockup"],
+      "pr_numbers": [1],
+      "issue_numbers": [],
+      "explanation_contains": ["guardrails.py", "[commit:"],
+      "used_fallback": true
+    },
+    "tags": ["generic-message", "file-context-fetch", "fallback"]
+  },
+  {
+    "id": "fallback-summary-single-line",
+    "description": "Single-line range on the extract_issue_refs function — edge case start_line == end_line",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/tools/github_issue_lookup.py",
+    "start_line": 69,
+    "end_line": 69,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["Add GitHub issue"],
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["github_issue_lookup.py"],
+      "used_fallback": true
+    },
+    "tags": ["single-line", "edge-case", "fallback"]
+  },
+  {
+    "id": "orchestrator-llm-mode",
+    "description": "Fallback summary builder — tests LLM mode (use_llm: true) on well-known local code",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/orchestrator.py",
+    "start_line": 208,
+    "end_line": 230,
+    "max_commits": 3,
+    "use_llm": true,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["initial mockup"],
+      "pr_numbers": [1],
+      "issue_numbers": [],
+      "explanation_contains": ["orchestrator.py"],
+      "used_fallback": false
+    },
+    "tags": ["llm-mode", "multi-pr"]
+  },
+  {
+    "id": "no-github-metadata",
+    "description": "Same file reader lines but with owner/repo set to null — no GitHub metadata path",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": null,
+    "repo_name": null,
+    "file_path": "git_explainer/tools/file_context_reader.py",
+    "start_line": 7,
+    "end_line": 14,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["Add git tools"],
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["file_context_reader.py", "No linked pull request"],
+      "used_fallback": true
+    },
+    "tags": ["no-metadata", "fallback"]
+  },
+  {
+    "id": "flask-init-imports",
+    "description": "Flask package __init__.py imports — stable open-source file with deep history",
+    "repo_url": "https://github.com/pallets/flask",
+    "owner": "pallets",
+    "repo_name": "flask",
+    "file_path": "src/flask/__init__.py",
+    "start_line": 1,
+    "end_line": 10,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": [],
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["__init__.py"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "multi-commit"]
+  },
+  {
+    "id": "requests-api-surface",
+    "description": "Requests library top-level api.py — well-known stable file in an external repo",
+    "repo_url": "https://github.com/psf/requests",
+    "owner": "psf",
+    "repo_name": "requests",
+    "file_path": "src/requests/api.py",
+    "start_line": 1,
+    "end_line": 15,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": [],
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["api.py"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback"]
+  }
+]
