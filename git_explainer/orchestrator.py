@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
@@ -15,7 +16,9 @@ from git_explainer.llm import LLMUnavailableError, chat, is_available
 from git_explainer.memory import ExplainerMemory
 from git_explainer.prompts import SYSTEM_PROMPT, build_synthesis_prompt
 from git_explainer.tools.file_context_reader import read_file_at_revision
+from git_explainer.tools.commit_search import search_commits
 from git_explainer.tools.git_blame_trace import trace_line_history
+from git_explainer.tools.git_diff_reader import get_diff
 from git_explainer.tools.github_issue_lookup import (
     extract_issue_refs,
     fetch_issue,
@@ -43,6 +46,7 @@ class ExplanationResult(TypedDict):
     pull_requests: list[dict[str, Any]]
     issues: list[dict[str, Any]]
     file_contexts: list[dict[str, Any]]
+    diffs: list[dict[str, Any]]
     cache_stats: dict[str, int]
     used_fallback: bool
 
@@ -65,12 +69,23 @@ class GitExplainerAgent:
             max_count=normalized.max_commits,
         )
 
-        pull_requests, issues, contexts = self._collect_evidence(normalized, commits, memory)
+        if not commits:
+            try:
+                commits = search_commits(
+                    normalized.repo_path,
+                    path=normalized.file_path,
+                    max_count=normalized.max_commits,
+                )
+            except ValueError:
+                commits = []
+
+        pull_requests, issues, contexts, diffs = self._collect_evidence(normalized, commits, memory)
         evidence = {
             "commits": commits,
             "pull_requests": pull_requests,
             "issues": issues,
             "file_contexts": contexts,
+            "diffs": diffs,
         }
         explanation, used_fallback = self._synthesize(normalized, evidence)
         memory.flush()
@@ -82,6 +97,7 @@ class GitExplainerAgent:
             pull_requests=pull_requests,
             issues=issues,
             file_contexts=contexts,
+            diffs=diffs,
             cache_stats=memory.stats(),
             used_fallback=used_fallback,
         )
@@ -91,10 +107,11 @@ class GitExplainerAgent:
         query: ExplainerQuery,
         commits: list[dict[str, Any]],
         memory: ExplainerMemory,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         pull_requests: list[dict[str, Any]] = []
         issues: list[dict[str, Any]] = []
         contexts: list[dict[str, Any]] = []
+        diffs: list[dict[str, Any]] = []
         seen_prs: set[int] = set()
         seen_issues: set[int] = set()
 
@@ -164,6 +181,23 @@ class GitExplainerAgent:
                         "content": context_text,
                     })
 
+            diff_key = f"{lookup_sha}:{query.file_path}"
+            diff_data = memory.get_diff(diff_key)
+            if diff_data is None:
+                try:
+                    diff_summary = get_diff(
+                        query.repo_path,
+                        lookup_sha,
+                        file_path=query.file_path,
+                        context_lines=1,
+                    )
+                    diff_data = _compact_diff(diff_summary, commit["sha"])
+                except (ValueError, OSError):
+                    diff_data = {"commit_sha": commit["sha"], "hunks": []}
+                memory.set_diff(diff_key, diff_data)
+            if diff_data.get("hunks"):
+                diffs.append(diff_data)
+
             for issue_number in sorted(commit_issue_refs):
                 if issue_number in seen_issues or not query.owner or not query.repo_name:
                     continue
@@ -184,7 +218,9 @@ class GitExplainerAgent:
                 issues.append(issue_record)
                 seen_issues.add(issue_number)
 
-        return pull_requests, issues, contexts
+        return pull_requests, issues, contexts, diffs
+
+    _REQUIRED_KEYS = {"what_changed", "why", "tradeoffs", "limitations", "summary"}
 
     def _synthesize(
         self,
@@ -192,16 +228,28 @@ class GitExplainerAgent:
         evidence: dict[str, Any],
     ) -> tuple[ExplanationSections, bool]:
         if self.use_llm and is_available():
-            try:
-                response = chat(
-                    build_synthesis_prompt(query.to_dict(), evidence),
-                    system_prompt=SYSTEM_PROMPT,
-                    temperature=0.1,
-                )
-                parsed = json.loads(response)
-                return self._normalize_sections(parsed), False
-            except (LLMUnavailableError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-                pass
+            prompt = build_synthesis_prompt(query.to_dict(), evidence)
+            for attempt in range(2):
+                try:
+                    if attempt == 1:
+                        prompt = (
+                            "Your previous response was not valid JSON. "
+                            "Reply ONLY with a JSON object (no markdown fences) "
+                            "containing keys: what_changed, why, tradeoffs, "
+                            "limitations, summary.\n\n" + prompt
+                        )
+                    response = chat(
+                        prompt,
+                        system_prompt=SYSTEM_PROMPT,
+                        temperature=0.1,
+                    )
+                    parsed = json.loads(_extract_json(response))
+                    if not self._REQUIRED_KEYS.issubset(parsed.keys()):
+                        continue
+                    return self._normalize_sections(parsed), False
+                except (LLMUnavailableError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+                    if attempt == 1:
+                        break
 
         return self._fallback_summary(query, evidence), True
 
@@ -214,6 +262,7 @@ class GitExplainerAgent:
         pull_requests = evidence["pull_requests"]
         issues = evidence["issues"]
         contexts = evidence["file_contexts"]
+        diffs = evidence.get("diffs", [])
 
         commit_citations = " ".join(f"[commit:{c['sha']}]" for c in commits[:3]) or "[commit:none]"
         pr_citations = " ".join(f"[pr:#{pr['number']}]" for pr in pull_requests[:2])
@@ -226,6 +275,19 @@ class GitExplainerAgent:
                 + "; ".join(f"{c['sha']} ({c['message']})" for c in commits[:3])
                 + f". {commit_citations}"
             )
+            if diffs:
+                diff_total_adds = sum(
+                    len([l for l in h["changes"] if l.startswith("+")])
+                    for d in diffs for h in d.get("hunks", [])
+                )
+                diff_total_dels = sum(
+                    len([l for l in h["changes"] if l.startswith("-")])
+                    for d in diffs for h in d.get("hunks", [])
+                )
+                what_changed += (
+                    f" The diffs show {diff_total_adds} addition(s) and "
+                    f"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s)."
+                )
         else:
             what_changed = (
                 f"No line-history commits were found for {query.file_path}:{query.start_line}-{query.end_line}. "
@@ -292,6 +354,37 @@ class GitExplainerAgent:
             f"{sha}:{query.file_path}:{query.start_line}:{query.end_line}:"
             f"{query.context_radius}"
         )
+
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)\n```", re.DOTALL)
+
+
+def _extract_json(text: str) -> str:
+    """Strip markdown code fences if the LLM wrapped its JSON response."""
+    m = _JSON_FENCE_RE.search(text)
+    return m.group(1).strip() if m else text.strip()
+
+
+_MAX_DIFF_LINES = 80
+
+
+def _compact_diff(diff_summary: dict[str, Any], short_sha: str) -> dict[str, Any]:
+    """Flatten a DiffSummary into a compact dict for evidence and caching."""
+    hunks: list[dict[str, Any]] = []
+    for file_diff in diff_summary.get("files", []):
+        for hunk in file_diff.get("hunks", []):
+            lines = []
+            for hl in hunk.get("lines", []):
+                if hl["type"] == "add":
+                    lines.append(f"+{hl['content']}")
+                elif hl["type"] == "delete":
+                    lines.append(f"-{hl['content']}")
+            if lines:
+                hunks.append({
+                    "header": hunk["header"],
+                    "changes": lines[:_MAX_DIFF_LINES],
+                })
+    return {"commit_sha": short_sha, "hunks": hunks}
 
 
 def explain_code_history(
