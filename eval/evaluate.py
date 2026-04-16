@@ -117,6 +117,37 @@ def setup_repos(cases: list[BenchmarkCase]) -> dict[str, str]:
     return repo_map
 
 
+def score_error_case(case: BenchmarkCase, error: str | None, elapsed: float) -> CaseScore:
+    """Score a case that is expected to raise an error."""
+    expected = case.expected
+    checks: dict[str, bool] = {}
+
+    if error is None:
+        # Expected an error but none occurred
+        checks["expects_error"] = False
+        return CaseScore(
+            case_id=case.id,
+            passed=False,
+            checks=checks,
+            elapsed_seconds=round(elapsed, 3),
+            error=None,
+        )
+
+    checks["expects_error"] = True
+
+    if "error_contains" in expected:
+        checks["error_contains"] = expected["error_contains"].lower() in error.lower()
+
+    passed = all(checks.values())
+    return CaseScore(
+        case_id=case.id,
+        passed=passed,
+        checks=checks,
+        elapsed_seconds=round(elapsed, 3),
+        error=None,  # Expected error — not a harness failure
+    )
+
+
 def score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -> CaseScore:
     """Score an agent result against expected values from the benchmark case."""
     expected = case.expected
@@ -202,6 +233,7 @@ def run_case(
             error="Repository clone failed",
         )
 
+    expects_error = case.expected.get("expects_error", False)
     use_llm = case.use_llm and not no_llm
     t0 = time.monotonic()
     try:
@@ -217,15 +249,20 @@ def run_case(
             use_llm=use_llm,
         )
         elapsed = time.monotonic() - t0
+        if expects_error:
+            return score_error_case(case, None, elapsed)
         return score_case(case, result, elapsed)
     except Exception as exc:
         elapsed = time.monotonic() - t0
+        error_msg = f"{type(exc).__name__}: {exc}"
+        if expects_error:
+            return score_error_case(case, error_msg, elapsed)
         return CaseScore(
             case_id=case.id,
             passed=False,
             checks={},
             elapsed_seconds=round(elapsed, 3),
-            error=f"{type(exc).__name__}: {exc}",
+            error=error_msg,
         )
 
 
