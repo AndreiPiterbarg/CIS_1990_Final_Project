@@ -29,6 +29,7 @@ from git_explainer.tools.github_pr_lookup import (
     fetch_pr_comments,
     find_prs_for_commit,
 )
+from git_explainer.tools.question_resolver import resolve_question_to_code
 
 
 class ExplanationSections(TypedDict):
@@ -41,6 +42,7 @@ class ExplanationSections(TypedDict):
 
 class ExplanationResult(TypedDict):
     query: dict[str, Any]
+    resolved_target: dict[str, Any] | None
     explanation: ExplanationSections
     commits: list[dict[str, Any]]
     pull_requests: list[dict[str, Any]]
@@ -59,6 +61,32 @@ class GitExplainerAgent:
 
     def explain(self, query: ExplainerQuery) -> ExplanationResult:
         normalized = validate_query(query)
+        resolved_target: dict[str, Any] | None = None
+
+        if normalized.question and normalized.start_line is None and normalized.end_line is None:
+            original_question = normalized.question
+            resolution = resolve_question_to_code(
+                normalized.repo_path,
+                normalized.question,
+                file_path_hint=normalized.file_path,
+            )
+            resolved_target = resolution.to_dict()
+            normalized = validate_query(
+                ExplainerQuery(
+                    repo_path=normalized.repo_path,
+                    file_path=resolution.file_path,
+                    start_line=resolution.start_line,
+                    end_line=resolution.end_line,
+                    question=None,
+                    owner=normalized.owner,
+                    repo_name=normalized.repo_name,
+                    max_commits=normalized.max_commits,
+                    context_radius=normalized.context_radius,
+                    enforce_public_repo=normalized.enforce_public_repo,
+                )
+            )
+            normalized.question = original_question
+
         memory = ExplainerMemory(normalized.repo_path)
 
         commits = trace_line_history(
@@ -92,6 +120,7 @@ class GitExplainerAgent:
 
         return ExplanationResult(
             query=normalized.to_dict(),
+            resolved_target=resolved_target,
             explanation=explanation,
             commits=commits,
             pull_requests=pull_requests,
@@ -267,10 +296,11 @@ class GitExplainerAgent:
         commit_citations = " ".join(f"[commit:{c['sha']}]" for c in commits[:3]) or "[commit:none]"
         pr_citations = " ".join(f"[pr:#{pr['number']}]" for pr in pull_requests[:2])
         issue_citations = " ".join(f"[issue:#{issue['number']}]" for issue in issues[:2])
+        selection = _describe_selection(query)
 
         if commits:
             what_changed = (
-                f"The selected lines in {query.file_path}:{query.start_line}-{query.end_line} "
+                f"{selection} "
                 f"were most recently shaped by {len(commits)} traced commit(s): "
                 + "; ".join(f"{c['sha']} ({c['message']})" for c in commits[:3])
                 + f". {commit_citations}"
@@ -290,7 +320,7 @@ class GitExplainerAgent:
                 )
         else:
             what_changed = (
-                f"No line-history commits were found for {query.file_path}:{query.start_line}-{query.end_line}. "
+                f"No line-history commits were found for {selection}. "
                 "[commit:none]"
             )
 
@@ -389,10 +419,11 @@ def _compact_diff(diff_summary: dict[str, Any], short_sha: str) -> dict[str, Any
 
 def explain_code_history(
     repo_path: str,
-    file_path: str,
-    start_line: int,
-    end_line: int,
+    file_path: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
     *,
+    question: str | None = None,
     owner: str | None = None,
     repo_name: str | None = None,
     max_commits: int = 5,
@@ -407,6 +438,7 @@ def explain_code_history(
         file_path=file_path,
         start_line=start_line,
         end_line=end_line,
+        question=question,
         owner=owner,
         repo_name=repo_name,
         max_commits=max_commits,
@@ -414,3 +446,10 @@ def explain_code_history(
         enforce_public_repo=enforce_public_repo,
     )
     return agent.explain(query)
+
+
+def _describe_selection(query: ExplainerQuery) -> str:
+    target = f"{query.file_path}:{query.start_line}-{query.end_line}"
+    if query.question:
+        return f'The code matched for "{query.question}" in {target}'
+    return f"The selected lines in {target}"

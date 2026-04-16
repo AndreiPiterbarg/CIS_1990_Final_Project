@@ -208,5 +208,41 @@
       "used_fallback": true
     },
     "tags": ["external-repo", "fallback"]
+  },
+  {
+    "id": "question-issue-lookup-library",
+    "description": "Natural-language query that asks why requests is used for GitHub issue lookups",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "question": "Why is requests used for GitHub issue lookups?",
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "resolved_file_path": "git_explainer/tools/github_issue_lookup.py",
+      "resolved_preview_contains": ["import requests", "fetch_issue"],
+      "min_commits": 1,
+      "commit_message_contains": ["Add GitHub issue and PR lookup"],
+      "used_fallback": true
+    },
+    "tags": ["question-mode", "library-usage", "fallback"]
+  },
+  {
+    "id": "question-file-context-heuristic",
+    "description": "Natural-language query that asks how the agent decides to fetch surrounding file context",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "question": "How does the agent decide when to fetch surrounding file context?",
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "resolved_file_path": "git_explainer/guardrails.py",
+      "resolved_preview_contains": ["should_fetch_file_context", "_GENERIC_MESSAGE_RE"],
+      "min_commits": 1,
+      "commit_message_contains": ["initial mockup"],
+      "used_fallback": true
+    },
+    "tags": ["question-mode", "file-context-fetch", "fallback"]
   }
 ]

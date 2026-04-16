@@ -24,9 +24,10 @@ _GITHUB_REMOTE_RE = re.compile(
 @dataclass(slots=True)
 class ExplainerQuery:
     repo_path: str
-    file_path: str
-    start_line: int
-    end_line: int
+    file_path: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    question: str | None = None
     owner: str | None = None
     repo_name: str | None = None
     max_commits: int = config.DEFAULT_MAX_COMMITS
@@ -43,32 +44,44 @@ def validate_query(query: ExplainerQuery) -> ExplainerQuery:
     if not repo.is_dir() or not (repo / ".git").exists():
         raise ValueError(f"Not a git repository: {repo}")
 
-    if query.start_line <= 0 or query.end_line <= 0:
-        raise ValueError("Line numbers must be positive integers")
-    if query.end_line < query.start_line:
-        raise ValueError("end_line must be greater than or equal to start_line")
+    question = query.question.strip() if query.question is not None else None
+    question = question or None
 
-    span = query.end_line - query.start_line + 1
-    if span > config.DEFAULT_MAX_LINE_SPAN:
-        raise ValueError(
-            f"Requested line range spans {span} lines; maximum is "
-            f"{config.DEFAULT_MAX_LINE_SPAN}"
-        )
+    file_path: str | None = None
+    if query.file_path is not None:
+        file_path = normalize_file_path(str(repo), query.file_path)
 
-    file_path = normalize_file_path(str(repo), query.file_path)
-    file_text = read_file_at_revision(str(repo), file_path, revision="HEAD")
-    if file_text is None:
-        file_text = read_file_at_revision(str(repo), file_path)
-    if file_text is None:
-        raise ValueError(f"File not found in repository: {file_path}")
-    if file_text == "[binary file]":
-        raise ValueError(f"Binary files are not supported: {file_path}")
+    if question is not None:
+        if query.start_line is not None or query.end_line is not None:
+            raise ValueError("question mode does not accept start_line or end_line")
+        if file_path is not None:
+            _read_text_file(str(repo), file_path)
+        start_line = None
+        end_line = None
+    else:
+        if file_path is None or query.start_line is None or query.end_line is None:
+            raise ValueError(
+                "Provide file_path, start_line, and end_line, or use question mode"
+            )
+        if query.start_line <= 0 or query.end_line <= 0:
+            raise ValueError("Line numbers must be positive integers")
+        if query.end_line < query.start_line:
+            raise ValueError("end_line must be greater than or equal to start_line")
 
-    line_count = len(file_text.splitlines())
-    if query.end_line > line_count:
-        raise ValueError(
-            f"Requested end_line {query.end_line} exceeds file length {line_count}"
-        )
+        span = query.end_line - query.start_line + 1
+        if span > config.DEFAULT_MAX_LINE_SPAN:
+            raise ValueError(
+                f"Requested line range spans {span} lines; maximum is "
+                f"{config.DEFAULT_MAX_LINE_SPAN}"
+            )
+
+        line_count = len(_read_text_file(str(repo), file_path).splitlines())
+        if query.end_line > line_count:
+            raise ValueError(
+                f"Requested end_line {query.end_line} exceeds file length {line_count}"
+            )
+        start_line = query.start_line
+        end_line = query.end_line
 
     owner = query.owner
     repo_name = query.repo_name
@@ -81,8 +94,9 @@ def validate_query(query: ExplainerQuery) -> ExplainerQuery:
     normalized = ExplainerQuery(
         repo_path=str(repo),
         file_path=file_path,
-        start_line=query.start_line,
-        end_line=query.end_line,
+        start_line=start_line,
+        end_line=end_line,
+        question=question,
         owner=owner,
         repo_name=repo_name,
         max_commits=max(1, min(query.max_commits, 20)),
@@ -98,6 +112,17 @@ def validate_query(query: ExplainerQuery) -> ExplainerQuery:
         ensure_public_github_repo(normalized.owner, normalized.repo_name)
 
     return normalized
+
+
+def _read_text_file(repo_path: str, file_path: str) -> str:
+    file_text = read_file_at_revision(repo_path, file_path, revision="HEAD")
+    if file_text is None:
+        file_text = read_file_at_revision(repo_path, file_path)
+    if file_text is None:
+        raise ValueError(f"File not found in repository: {file_path}")
+    if file_text == "[binary file]":
+        raise ValueError(f"Binary files are not supported: {file_path}")
+    return file_text
 
 
 def normalize_file_path(repo_path: str, file_path: str) -> str:

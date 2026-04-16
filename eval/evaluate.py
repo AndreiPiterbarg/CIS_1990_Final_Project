@@ -28,9 +28,10 @@ class BenchmarkCase:
     repo_url: str
     owner: str | None
     repo_name: str | None
-    file_path: str
-    start_line: int
-    end_line: int
+    file_path: str | None
+    start_line: int | None
+    end_line: int | None
+    question: str | None
     max_commits: int
     use_llm: bool
     expected: dict[str, Any]
@@ -45,9 +46,10 @@ class BenchmarkCase:
             repo_url=data["repo_url"],
             owner=data.get("owner"),
             repo_name=data.get("repo_name"),
-            file_path=data["file_path"],
-            start_line=data["start_line"],
-            end_line=data["end_line"],
+            file_path=data.get("file_path"),
+            start_line=data.get("start_line"),
+            end_line=data.get("end_line"),
+            question=data.get("question"),
             max_commits=data["max_commits"],
             use_llm=data["use_llm"],
             expected=data.get("expected", {}),
@@ -158,6 +160,23 @@ def score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -
     if "used_fallback" in expected:
         checks["used_fallback"] = result["used_fallback"] == expected["used_fallback"]
 
+    resolved = result.get("resolved_target") or {}
+    if "resolved_file_path" in expected:
+        checks["resolved_file_path"] = resolved.get("file_path") == expected["resolved_file_path"]
+
+    if "resolved_matched_terms" in expected:
+        found_terms = set(resolved.get("matched_terms", []))
+        checks["resolved_matched_terms"] = all(
+            term in found_terms for term in expected["resolved_matched_terms"]
+        )
+
+    if "resolved_preview_contains" in expected:
+        preview = str(resolved.get("preview", "")).lower()
+        checks["resolved_preview_contains"] = all(
+            phrase.lower() in preview
+            for phrase in expected["resolved_preview_contains"]
+        )
+
     passed = all(checks.values()) if checks else True
     return CaseScore(
         case_id=case.id,
@@ -191,6 +210,7 @@ def run_case(
             file_path=case.file_path,
             start_line=case.start_line,
             end_line=case.end_line,
+            question=case.question,
             owner=case.owner,
             repo_name=case.repo_name,
             max_commits=case.max_commits,

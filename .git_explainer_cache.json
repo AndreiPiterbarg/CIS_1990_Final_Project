@@ -1,0 +1,296 @@
+{
+  "commit_prs": {
+    "186e6da48c9cf874b954bf24d783f1f6bee868d5": [],
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075": [
+      1
+    ],
+    "4c711bfc4861f860a0cb2e3b7e78739df5f25339": [],
+    "628ef3cecd7deeb57b0101f1707b2cb7f724acba": []
+  },
+  "contexts": {
+    "186e6da48c9cf874b954bf24d783f1f6bee868d5:git_explainer/tools/github_issue_lookup.py:1:40:30": "from __future__ import annotations\n\nimport re\n\nimport requests\n\nfrom git_explainer.config import GITHUB_API_BASE, GITHUB_TOKEN\n\n_HEADERS: dict[str, str] = {\n    \"Authorization\": f\"token {GITHUB_TOKEN}\",\n    \"Accept\": \"application/vnd.github.v3+json\",\n}\n\n_ISSUE_RE = re.compile(\n    r\"(?:(?:fix(?:es|ed)?|clos(?:es|ed)?|resolv(?:es|ed)?|related\\s+to)\\s+)?#(\\d+)\",\n    re.IGNORECASE,\n)\n\n\ndef fetch_issue(\n    owner: str,\n    repo: str,\n    issue_number: int,\n) -> dict[str, str | int | list[str]] | None:\n    \"\"\"Fetch a single GitHub issue by number. Returns None if not found.\"\"\"\n    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}\"\n    resp = requests.get(url, headers=_HEADERS, timeout=10)\n\n    if resp.status_code == 404:\n        return None\n    if resp.status_code in (401, 403):\n        raise requests.HTTPError(\n            f\"GitHub auth error ({resp.status_code}): check GITHUB_TOKEN\",\n            response=resp,\n        )\n    if resp.status_code == 429:\n        raise requests.HTTPError(\n            \"GitHub rate limit exceeded (429)\", response=resp\n        )\n    resp.raise_for_status()\n\n    data = resp.json()\n    return {\n        \"number\": data[\"number\"],\n        \"title\": data[\"title\"],\n        \"state\": data[\"state\"],\n        \"body\": data[\"body\"] or \"\",\n        \"labels\": [label[\"name\"] for label in data[\"labels\"]],\n        \"created_at\": data[\"created_at\"],\n        \"user\": data[\"user\"][\"login\"],\n    }\n\n\ndef extract_issue_refs(text: str) -> list[int]:\n    \"\"\"Extract deduplicated issue numbers from a commit message.\"\"\"\n    return list(dict.fromkeys(int(m) for m in _ISSUE_RE.findall(text)))\n\n\ndef fetch_issues(\n    owner: str,\n    repo: str,\n    issue_numbers: list[int],\n) -> list[dict[str, str | int | list[str]]]:\n    \"\"\"Fetch multiple issues, skipping any that don't exist.\"\"\"\n    results = []\n    for num in issue_numbers:\n        issue = fetch_issue(owner, repo, num)\n        if issue is not None:\n            results.append(issue)\n    return results\n",
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/config.py:13:19:30": "\"\"\"Configuration helpers for the Git explainer agent.\"\"\"\n\nfrom __future__ import annotations\n\nimport os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# Environment-backed credentials. We keep module import side effects light so\n# tests and offline workflows can still import the package.\nGITHUB_TOKEN = os.getenv(\"GITHUB_TOKEN\", \"\")\nGROQ_API_KEY = os.getenv(\"GROQ_API_KEY\", \"\")\n\n# Groq / OpenAI-compatible endpoint\nGROQ_BASE_URL = os.getenv(\"GROQ_BASE_URL\", \"https://api.groq.com/openai/v1\")\nGROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")\nGROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))\n\n# GitHub API\nGITHUB_API_BASE = os.getenv(\"GITHUB_API_BASE\", \"https://api.github.com\")\n\n# Agent defaults from the PRD\nDEFAULT_MAX_LINE_SPAN = int(os.getenv(\"GIT_EXPLAINER_MAX_LINE_SPAN\", \"200\"))\nDEFAULT_MAX_COMMITS = int(os.getenv(\"GIT_EXPLAINER_MAX_COMMITS\", \"5\"))\nDEFAULT_CONTEXT_RADIUS = int(os.getenv(\"GIT_EXPLAINER_CONTEXT_RADIUS\", \"30\"))\nCACHE_FILENAME = os.getenv(\"GIT_EXPLAINER_CACHE_FILENAME\", \".git_explainer_cache.json\")\n\n\ndef github_headers(*, accept: str = \"application/vnd.github.v3+json\") -> dict[str, str]:\n    \"\"\"Return GitHub headers with the configured token, if any.\"\"\"\n    return {\n        \"Authorization\": f\"token {GITHUB_TOKEN}\",\n        \"Accept\": accept,\n    }\n\n\ndef has_github_token() -> bool:\n    return bool(GITHUB_TOKEN.strip())\n\n\ndef has_groq_api_key() -> bool:\n    return bool(GROQ_API_KEY.strip())\n",
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/tools/github_issue_lookup.py:1:40:30": "from __future__ import annotations\n\nimport re\nimport time\n\nimport requests\n\nfrom git_explainer.config import GITHUB_API_BASE, github_headers\n\n_HEADERS: dict[str, str] = github_headers()\n\n_ISSUE_RE = re.compile(\n    r\"(?:(?:fix(?:es|ed)?|clos(?:es|ed)?|resolv(?:es|ed)?|related\\s+to)\\s+)?#(\\d+)\",\n    re.IGNORECASE,\n)\n\n\ndef fetch_issue(\n    owner: str,\n    repo: str,\n    issue_number: int,\n) -> dict[str, str | int | list[str]] | None:\n    \"\"\"Fetch a single GitHub issue by number. Returns None if not found.\"\"\"\n    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}\"\n    resp = _get(url)\n\n    if resp.status_code == 404:\n        return None\n    if resp.status_code in (401, 403):\n        raise requests.HTTPError(\n            f\"GitHub auth error ({resp.status_code}): check GITHUB_TOKEN\",\n            response=resp,\n        )\n    if resp.status_code == 429:\n        raise requests.HTTPError(\n            \"GitHub rate limit exceeded (429)\", response=resp\n        )\n    resp.raise_for_status()\n\n    data = resp.json()\n    return {\n        \"number\": data[\"number\"],\n        \"title\": data[\"title\"],\n        \"state\": data[\"state\"],\n        \"body\": data[\"body\"] or \"\",\n        \"labels\": [label[\"name\"] for label in data[\"labels\"]],\n        \"created_at\": data[\"created_at\"],\n        \"user\": data[\"user\"][\"login\"],\n    }\n\n\ndef fetch_issue_comments(owner: str, repo: str, issue_number: int) -> list[dict[str, str]]:\n    \"\"\"Fetch issue comments (first page, up to 30).\"\"\"\n    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments\"\n    resp = _get(url)\n    if resp.status_code == 404:\n        return []\n    resp.raise_for_status()\n    return [\n        {\n            \"user\": comment[\"user\"][\"login\"],\n            \"body\": comment[\"body\"],\n            \"created_at\": comment[\"created_at\"],\n        }\n        for comment in resp.json()\n    ]\n\n\ndef extract_issue_refs(text: str) -> list[int]:\n    \"\"\"Extract deduplicated issue numbers from a commit message.\"\"\"\n",
+    "4c711bfc4861f860a0cb2e3b7e78739df5f25339:git_explainer/config.py:13:19:30": "import os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# --- Required (fail fast if missing) ---\nGITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]\nGROQ_API_KEY = os.environ[\"GROQ_API_KEY\"]\n\n# --- Groq API settings (OpenAI-compatible endpoint) ---\nGROQ_BASE_URL = \"https://api.groq.com/openai/v1\"\nGROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")\nGROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))\n\n# --- GitHub API ---\nGITHUB_API_BASE = \"https://api.github.com\"\n",
+    "628ef3cecd7deeb57b0101f1707b2cb7f724acba:git_explainer/config.py:13:19:30": "import os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# --- Required (fail fast if missing) ---\nGITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]\nKIMI_API_KEY = os.environ[\"KIMI_API_KEY\"]\n\n# --- Kimi API settings ---\nKIMI_BASE_URL = \"https://api.moonshot.cn/v1\"\nKIMI_MODEL = os.getenv(\"KIMI_MODEL\", \"moonshot-v1-8k\")\nKIMI_MAX_TOKENS = int(os.getenv(\"KIMI_MAX_TOKENS\", \"4096\"))\n\n# --- GitHub API ---\nGITHUB_API_BASE = \"https://api.github.com\"\n"
+  },
+  "diffs": {
+    "186e6da48c9cf874b954bf24d783f1f6bee868d5:git_explainer/tools/github_issue_lookup.py": {
+      "commit_sha": "186e6da",
+      "hunks": [
+        {
+          "changes": [
+            "+from __future__ import annotations",
+            "+",
+            "+import re",
+            "+",
+            "+import requests",
+            "+",
+            "+from git_explainer.config import GITHUB_API_BASE, GITHUB_TOKEN",
+            "+",
+            "+_HEADERS: dict[str, str] = {",
+            "+    \"Authorization\": f\"token {GITHUB_TOKEN}\",",
+            "+    \"Accept\": \"application/vnd.github.v3+json\",",
+            "+}",
+            "+",
+            "+_ISSUE_RE = re.compile(",
+            "+    r\"(?:(?:fix(?:es|ed)?|clos(?:es|ed)?|resolv(?:es|ed)?|related\\s+to)\\s+)?#(\\d+)\",",
+            "+    re.IGNORECASE,",
+            "+)",
+            "+",
+            "+",
+            "+def fetch_issue(",
+            "+    owner: str,",
+            "+    repo: str,",
+            "+    issue_number: int,",
+            "+) -> dict[str, str | int | list[str]] | None:",
+            "+    \"\"\"Fetch a single GitHub issue by number. Returns None if not found.\"\"\"",
+            "+    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}\"",
+            "+    resp = requests.get(url, headers=_HEADERS, timeout=10)",
+            "+",
+            "+    if resp.status_code == 404:",
+            "+        return None",
+            "+    if resp.status_code in (401, 403):",
+            "+        raise requests.HTTPError(",
+            "+            f\"GitHub auth error ({resp.status_code}): check GITHUB_TOKEN\",",
+            "+            response=resp,",
+            "+        )",
+            "+    if resp.status_code == 429:",
+            "+        raise requests.HTTPError(",
+            "+            \"GitHub rate limit exceeded (429)\", response=resp",
+            "+        )",
+            "+    resp.raise_for_status()",
+            "+",
+            "+    data = resp.json()",
+            "+    return {",
+            "+        \"number\": data[\"number\"],",
+            "+        \"title\": data[\"title\"],",
+            "+        \"state\": data[\"state\"],",
+            "+        \"body\": data[\"body\"] or \"\",",
+            "+        \"labels\": [label[\"name\"] for label in data[\"labels\"]],",
+            "+        \"created_at\": data[\"created_at\"],",
+            "+        \"user\": data[\"user\"][\"login\"],",
+            "+    }",
+            "+",
+            "+",
+            "+def extract_issue_refs(text: str) -> list[int]:",
+            "+    \"\"\"Extract deduplicated issue numbers from a commit message.\"\"\"",
+            "+    return list(dict.fromkeys(int(m) for m in _ISSUE_RE.findall(text)))",
+            "+",
+            "+",
+            "+def fetch_issues(",
+            "+    owner: str,",
+            "+    repo: str,",
+            "+    issue_numbers: list[int],",
+            "+) -> list[dict[str, str | int | list[str]]]:",
+            "+    \"\"\"Fetch multiple issues, skipping any that don't exist.\"\"\"",
+            "+    results = []",
+            "+    for num in issue_numbers:",
+            "+        issue = fetch_issue(owner, repo, num)",
+            "+        if issue is not None:",
+            "+            results.append(issue)",
+            "+    return results"
+          ],
+          "header": "@@ -0,0 +1,70 @@"
+        }
+      ]
+    },
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/config.py": {
+      "commit_sha": "3870c34",
+      "hunks": [
+        {
+          "changes": [
+            "+\"\"\"Configuration helpers for the Git explainer agent.\"\"\"",
+            "+",
+            "+from __future__ import annotations",
+            "+"
+          ],
+          "header": "@@ -1 +1,5 @@"
+        },
+        {
+          "changes": [
+            "-# --- Required (fail fast if missing) ---",
+            "-GITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]",
+            "-GROQ_API_KEY = os.environ[\"GROQ_API_KEY\"]",
+            "+# Environment-backed credentials. We keep module import side effects light so",
+            "+# tests and offline workflows can still import the package.",
+            "+GITHUB_TOKEN = os.getenv(\"GITHUB_TOKEN\", \"\")",
+            "+GROQ_API_KEY = os.getenv(\"GROQ_API_KEY\", \"\")",
+            "-# --- Groq API settings (OpenAI-compatible endpoint) ---",
+            "-GROQ_BASE_URL = \"https://api.groq.com/openai/v1\"",
+            "+# Groq / OpenAI-compatible endpoint",
+            "+GROQ_BASE_URL = os.getenv(\"GROQ_BASE_URL\", \"https://api.groq.com/openai/v1\")"
+          ],
+          "header": "@@ -6,8 +10,9 @@ load_dotenv()"
+        },
+        {
+          "changes": [
+            "-# --- GitHub API ---",
+            "-GITHUB_API_BASE = \"https://api.github.com\"",
+            "+# GitHub API",
+            "+GITHUB_API_BASE = os.getenv(\"GITHUB_API_BASE\", \"https://api.github.com\")",
+            "+",
+            "+# Agent defaults from the PRD",
+            "+DEFAULT_MAX_LINE_SPAN = int(os.getenv(\"GIT_EXPLAINER_MAX_LINE_SPAN\", \"200\"))",
+            "+DEFAULT_MAX_COMMITS = int(os.getenv(\"GIT_EXPLAINER_MAX_COMMITS\", \"5\"))",
+            "+DEFAULT_CONTEXT_RADIUS = int(os.getenv(\"GIT_EXPLAINER_CONTEXT_RADIUS\", \"30\"))",
+            "+CACHE_FILENAME = os.getenv(\"GIT_EXPLAINER_CACHE_FILENAME\", \".git_explainer_cache.json\")",
+            "+",
+            "+",
+            "+def github_headers(*, accept: str = \"application/vnd.github.v3+json\") -> dict[str, str]:",
+            "+    \"\"\"Return GitHub headers with the configured token, if any.\"\"\"",
+            "+    return {",
+            "+        \"Authorization\": f\"token {GITHUB_TOKEN}\",",
+            "+        \"Accept\": accept,",
+            "+    }",
+            "+",
+            "+",
+            "+def has_github_token() -> bool:",
+            "+    return bool(GITHUB_TOKEN.strip())",
+            "+",
+            "+",
+            "+def has_groq_api_key() -> bool:",
+            "+    return bool(GROQ_API_KEY.strip())"
+          ],
+          "header": "@@ -15,3 +20,25 @@ GROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))"
+        }
+      ]
+    },
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/tools/github_issue_lookup.py": {
+      "commit_sha": "3870c34",
+      "hunks": [
+        {
+          "changes": [
+            "+import time"
+          ],
+          "header": "@@ -3,2 +3,3 @@ from __future__ import annotations"
+        },
+        {
+          "changes": [
+            "-from git_explainer.config import GITHUB_API_BASE, GITHUB_TOKEN",
+            "+from git_explainer.config import GITHUB_API_BASE, github_headers",
+            "-_HEADERS: dict[str, str] = {",
+            "-    \"Authorization\": f\"token {GITHUB_TOKEN}\",",
+            "-    \"Accept\": \"application/vnd.github.v3+json\",",
+            "-}",
+            "+_HEADERS: dict[str, str] = github_headers()"
+          ],
+          "header": "@@ -6,8 +7,5 @@ import requests"
+        },
+        {
+          "changes": [
+            "-    resp = requests.get(url, headers=_HEADERS, timeout=10)",
+            "+    resp = _get(url)"
+          ],
+          "header": "@@ -26,3 +24,3 @@ def fetch_issue("
+        },
+        {
+          "changes": [
+            "+def fetch_issue_comments(owner: str, repo: str, issue_number: int) -> list[dict[str, str]]:",
+            "+    \"\"\"Fetch issue comments (first page, up to 30).\"\"\"",
+            "+    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments\"",
+            "+    resp = _get(url)",
+            "+    if resp.status_code == 404:",
+            "+        return []",
+            "+    resp.raise_for_status()",
+            "+    return [",
+            "+        {",
+            "+            \"user\": comment[\"user\"][\"login\"],",
+            "+            \"body\": comment[\"body\"],",
+            "+            \"created_at\": comment[\"created_at\"],",
+            "+        }",
+            "+        for comment in resp.json()",
+            "+    ]",
+            "+",
+            "+"
+          ],
+          "header": "@@ -53,2 +51,19 @@ def fetch_issue("
+        },
+        {
+          "changes": [
+            "+",
+            "+",
+            "+def _get(url: str, *, retries: int = 3) -> requests.Response:",
+            "+    \"\"\"Make a GitHub GET request with lightweight backoff on rate limiting.\"\"\"",
+            "+    response: requests.Response | None = None",
+            "+    for attempt in range(retries):",
+            "+        response = requests.get(url, headers=_HEADERS, timeout=10)",
+            "+        if response.status_code not in (403, 429) or attempt == retries - 1:",
+            "+            return response",
+            "+        time.sleep(2 ** attempt)",
+            "+    assert response is not None",
+            "+    return response"
+          ],
+          "header": "@@ -70 +85,13 @@ def fetch_issues("
+        }
+      ]
+    },
+    "4c711bfc4861f860a0cb2e3b7e78739df5f25339:git_explainer/config.py": {
+      "commit_sha": "4c711bf",
+      "hunks": [
+        {
+          "changes": [
+            "-KIMI_API_KEY = os.environ[\"KIMI_API_KEY\"]",
+            "+GROQ_API_KEY = os.environ[\"GROQ_API_KEY\"]",
+            "-# --- Kimi API settings ---",
+            "-KIMI_BASE_URL = \"https://api.moonshot.cn/v1\"",
+            "-KIMI_MODEL = os.getenv(\"KIMI_MODEL\", \"moonshot-v1-8k\")",
+            "-KIMI_MAX_TOKENS = int(os.getenv(\"KIMI_MAX_TOKENS\", \"4096\"))",
+            "+# --- Groq API settings (OpenAI-compatible endpoint) ---",
+            "+GROQ_BASE_URL = \"https://api.groq.com/openai/v1\"",
+            "+GROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")",
+            "+GROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))"
+          ],
+          "header": "@@ -8,8 +8,8 @@ load_dotenv()"
+        }
+      ]
+    },
+    "628ef3cecd7deeb57b0101f1707b2cb7f724acba:git_explainer/config.py": {
+      "commit_sha": "628ef3c",
+      "hunks": [
+        {
+          "changes": [
+            "+import os",
+            "+",
+            "+from dotenv import load_dotenv",
+            "+",
+            "+load_dotenv()",
+            "+",
+            "+# --- Required (fail fast if missing) ---",
+            "+GITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]",
+            "+KIMI_API_KEY = os.environ[\"KIMI_API_KEY\"]",
+            "+",
+            "+# --- Kimi API settings ---",
+            "+KIMI_BASE_URL = \"https://api.moonshot.cn/v1\"",
+            "+KIMI_MODEL = os.getenv(\"KIMI_MODEL\", \"moonshot-v1-8k\")",
+            "+KIMI_MAX_TOKENS = int(os.getenv(\"KIMI_MAX_TOKENS\", \"4096\"))",
+            "+",
+            "+# --- GitHub API ---",
+            "+GITHUB_API_BASE = \"https://api.github.com\""
+          ],
+          "header": "@@ -0,0 +1,17 @@"
+        }
+      ]
+    }
+  },
+  "issue_comments": {},
+  "issues": {},
+  "pr_comments": {
+    "1": []
+  },
+  "prs": {
+    "1": {
+      "base_branch": "master",
+      "body": "Do not merge yet -- still needs some edits/review",
+      "created_at": "2026-04-14T05:55:42Z",
+      "head_branch": "agentv1",
+      "merge_commit_sha": "6d82e7ee9c8739060c02bb5586379566a27a00f7",
+      "merged_at": "2026-04-14T21:13:26Z",
+      "number": 1,
+      "state": "merged",
+      "title": "initial mockup",
+      "user": "aking526"
+    }
+  },
+  "version": 1
+}

@@ -24,6 +24,7 @@ MINIMAL_CASE_DICT = {
     "file_path": "src/app.py",
     "start_line": 10,
     "end_line": 20,
+    "question": None,
     "max_commits": 5,
     "use_llm": False,
     "expected": {},
@@ -52,8 +53,10 @@ def _make_result(**overrides) -> dict:
         "pull_requests": [],
         "issues": [],
         "file_contexts": [],
+        "diffs": [],
         "cache_stats": {"hits": 0, "misses": 0, "writes": 0},
         "used_fallback": False,
+        "resolved_target": None,
     }
     base.update(overrides)
     return base
@@ -94,6 +97,28 @@ class TestLoadBenchmark:
 
         with pytest.raises(SystemExit):
             load_benchmark(missing)
+
+    def test_parses_question_mode_case(self, tmp_path):
+        cases_data = [
+            {
+                **MINIMAL_CASE_DICT,
+                "id": "question-case",
+                "file_path": None,
+                "start_line": None,
+                "end_line": None,
+                "question": "Why is requests used for issue lookups?",
+            }
+        ]
+        bench_file = tmp_path / "benchmark.json"
+        bench_file.write_text(json.dumps(cases_data), encoding="utf-8")
+
+        result = load_benchmark(bench_file)
+
+        assert len(result) == 1
+        assert result[0].question == "Why is requests used for issue lookups?"
+        assert result[0].file_path is None
+        assert result[0].start_line is None
+        assert result[0].end_line is None
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +264,36 @@ class TestScoreCase:
 
         assert score.checks["explanation_contains"] is True
         assert score.passed is True
+
+    def test_resolved_target_checks_pass(self):
+        case = _make_case(
+            file_path=None,
+            start_line=None,
+            end_line=None,
+            question="Why is requests used for issue lookups?",
+            expected={
+                "resolved_file_path": "src/app.py",
+                "resolved_matched_terms": ["requests", "issue"],
+                "resolved_preview_contains": ["import requests"],
+            },
+        )
+        result = _make_result(
+            resolved_target={
+                "file_path": "src/app.py",
+                "start_line": 1,
+                "end_line": 6,
+                "score": 12.5,
+                "matched_terms": ["requests", "issue"],
+                "preview": "import requests\n\ndef fetch_issue():\n    pass",
+            }
+        )
+
+        score = score_case(case, result, elapsed=0.2)
+
+        assert score.passed is True
+        assert score.checks["resolved_file_path"] is True
+        assert score.checks["resolved_matched_terms"] is True
+        assert score.checks["resolved_preview_contains"] is True
 
 
 # ---------------------------------------------------------------------------

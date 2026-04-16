@@ -72,6 +72,52 @@ def test_validate_query_rejects_large_ranges(tmp_path):
         )
 
 
+def test_validate_query_accepts_question_mode(tmp_path):
+    repo = _make_repo(tmp_path)
+
+    result = validate_query(
+        ExplainerQuery(
+            repo_path=str(repo),
+            question="Why does this code fetch surrounding file context?",
+        )
+    )
+
+    assert result.file_path is None
+    assert result.start_line is None
+    assert result.end_line is None
+    assert result.question == "Why does this code fetch surrounding file context?"
+
+
+def test_validate_query_accepts_question_with_file_hint(tmp_path):
+    repo = _make_repo(tmp_path)
+
+    result = validate_query(
+        ExplainerQuery(
+            repo_path=str(repo),
+            file_path="./src/app.py",
+            question="Why does this file exist?",
+        )
+    )
+
+    assert result.file_path == "src/app.py"
+    assert result.question == "Why does this file exist?"
+
+
+def test_validate_query_rejects_question_with_line_numbers(tmp_path):
+    repo = _make_repo(tmp_path)
+
+    with pytest.raises(ValueError, match="question mode does not accept"):
+        validate_query(
+            ExplainerQuery(
+                repo_path=str(repo),
+                file_path="src/app.py",
+                start_line=1,
+                end_line=2,
+                question="Why is this here?",
+            )
+        )
+
+
 def test_should_fetch_file_context_for_generic_message():
     assert should_fetch_file_context("Fix bug")
     assert not should_fetch_file_context(

@@ -19,7 +19,8 @@ def build_synthesis_prompt(
 ) -> str:
     """Build the prompt passed to the synthesis model."""
     return (
-        "Explain why the selected code exists and how it evolved.\n\n"
+        "Explain why the selected code exists and how it evolved.\n"
+        "If the query includes a natural-language question, explain why the resolved code span answers it.\n\n"
         f"Query:\n{json.dumps(query, indent=2, sort_keys=True)}\n\n"
         f"Evidence:\n{json.dumps(evidence, indent=2, sort_keys=True)}\n\n"
         "Write concise sections for what_changed, why, tradeoffs, limitations, and summary."
