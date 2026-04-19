@@ -1,5 +1,6 @@
 {
   "commit_prs": {
+    "147ecc534ce6f9a1ac6893ca5bae9a8dbf6c889a": [],
     "186e6da48c9cf874b954bf24d783f1f6bee868d5": [],
     "1a24a9e7c59dfd36ba5b1f351441766df11bc6bf": [],
     "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075": [
@@ -8,9 +9,11 @@
     "4c711bfc4861f860a0cb2e3b7e78739df5f25339": [],
     "628ef3cecd7deeb57b0101f1707b2cb7f724acba": [],
     "b05641e9b7826896cbcb06e9de33c21498fef113": [],
+    "df17b4f23410af49d10a0f563671216d32b8d4c3": [],
     "fbcff04af33e759cc09fcf9bdc0544c982342eaf": []
   },
   "contexts": {
+    "147ecc534ce6f9a1ac6893ca5bae9a8dbf6c889a:git_explainer/orchestrator.py:301:391:30": "                            \"containing keys: what_changed, why, tradeoffs, \"\n                            \"limitations, summary. Every sentence in every \"\n                            \"section must include at least one bracketed \"\n                            \"citation like [commit:abc1234], [pr:#42], or \"\n                            \"[issue:#101].\\n\\n\" + prompt\n                        )\n                    response = chat(\n                        prompt,\n                        system_prompt=SYSTEM_PROMPT,\n                        temperature=0.1,\n                    )\n                    parsed = json.loads(_extract_json(response))\n                    if not self._REQUIRED_KEYS.issubset(parsed.keys()):\n                        continue\n                    normalized = self._normalize_sections(parsed)\n                    _ensure_citation_coverage(normalized)\n                    return normalized, False\n                except (\n                    CitationCoverageError,\n                    LLMUnavailableError,\n                    json.JSONDecodeError,\n                    KeyError,\n                    TypeError,\n                    ValueError,\n                ):\n                    if attempt == 1:\n                        break\n\n        return self._fallback_summary(query, evidence), True\n\n    def _fallback_summary(\n        self,\n        query: ExplainerQuery,\n        evidence: dict[str, Any],\n    ) -> ExplanationSections:\n        commits = evidence[\"commits\"]\n        pull_requests = evidence[\"pull_requests\"]\n        issues = evidence[\"issues\"]\n        contexts = evidence[\"file_contexts\"]\n        diffs = evidence.get(\"diffs\", [])\n\n        commit_citations = \" \".join(f\"[commit:{c['sha']}]\" for c in commits[:3]) or \"[commit:none]\"\n        pr_citations = \" \".join(f\"[pr:#{pr['number']}]\" for pr in pull_requests[:2])\n        issue_citations = \" \".join(f\"[issue:#{issue['number']}]\" for issue in issues[:2])\n        selection = _describe_selection(query)\n\n        if commits:\n            what_changed = (\n                f\"{selection} \"\n                f\"were most recently shaped by {len(commits)} traced commit(s): \"\n                + \"; \".join(f\"{c['sha']} ({c['message']})\" for c in commits[:3])\n                + f\" {commit_citations}.\"\n            )\n            if diffs:\n                diff_total_adds = sum(\n                    len([l for l in h[\"changes\"] if l.startswith(\"+\")])\n                    for d in diffs for h in d.get(\"hunks\", [])\n                )\n                diff_total_dels = sum(\n                    len([l for l in h[\"changes\"] if l.startswith(\"-\")])\n                    for d in diffs for h in d.get(\"hunks\", [])\n                )\n                what_changed += (\n                    f\" The diffs show {diff_total_adds} addition(s) and \"\n                    f\"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s) \"\n                    f\"{commit_citations}.\"\n                )\n        else:\n            what_changed = (\n                f\"No line-history commits were found for {selection} [commit:none].\"\n            )\n\n        if pull_requests or issues:\n            why_parts: list[str] = []\n            if pull_requests:\n                why_parts.append(\n                    \"Related pull requests suggest the intent was \"\n                    + \"; \".join(f\"#{pr['number']} ({pr['title']})\" for pr in pull_requests[:2])\n                    + f\" {pr_citations}.\"\n                )\n            if issues:\n                why_parts.append(\n                    \"Linked issues add context from \"\n                    + \"; \".join(f\"#{issue['number']} ({issue['title']})\" for issue in issues[:2])\n                    + f\" {issue_citations}.\"\n                )\n            why = \" \".join(why_parts)\n        else:\n            why = (\n                \"No linked pull request or issue metadata was found, so the intent can only be inferred \"\n                f\"from commit messages and surrounding code {commit_citations}.\"\n            )\n\n        if contexts:\n            tradeoffs = (\n                f\"Surrounding file context was fetched for {len(contexts)} commit(s), which suggests the change \"\n                f\"needed additional local context beyond the commit message {commit_citations}. \"\n                \"Explicit trade-offs were not clearly documented in the fetched metadata \"\n                f\"{commit_citations}.\"\n            )\n        else:\n            tradeoffs = (\n                \"The retrieved PRs and issues did not spell out clear trade-offs, so no stronger claim is made \"\n                f\"beyond the available commit and PR evidence \"\n                f\"{' '.join(x for x in [commit_citations, pr_citations] if x)}.\"\n            )\n\n        limitations = (\n            \"This explanation is limited to the traced commits, associated pull requests, linked issues, \"\n            \"and any fetched file context; if a change was discussed elsewhere, it will not appear here \"\n            f\"{' '.join(x for x in [commit_citations, pr_citations, issue_citations] if x)}.\"\n        )\n\n        summary = f\"{what_changed} {why}\"\n        return ExplanationSections(\n            what_changed=what_changed,\n            why=why,\n            tradeoffs=tradeoffs,\n            limitations=limitations,\n            summary=summary,\n        )\n\n    def _normalize_sections(self, data: dict[str, Any]) -> ExplanationSections:\n        return ExplanationSections(\n            what_changed=str(data[\"what_changed\"]).strip(),\n            why=str(data[\"why\"]).strip(),\n            tradeoffs=str(data[\"tradeoffs\"]).strip(),\n            limitations=str(data[\"limitations\"]).strip(),\n            summary=str(data[\"summary\"]).strip(),\n        )\n\n    def _context_cache_key(self, query: ExplainerQuery, sha: str) -> str:\n        return (\n            f\"{sha}:{query.file_path}:{query.start_line}:{query.end_line}:\"\n            f\"{query.context_radius}\"\n        )\n\n\n_JSON_FENCE_RE = re.compile(r\"```(?:json)?\\s*\\n(.*?)\\n```\", re.DOTALL)\n_CITATION_RE = re.compile(r\"\\[(?:commit:(?:[0-9a-f]{7,40}|none)|pr:#\\d+|issue:#\\d+)\\]\")\n_SENTENCE_RE = re.compile(r\"(?<=[.!?])\\s+|\\n+\")\n\n\ndef _extract_json(text: str) -> str:\n    \"\"\"Strip markdown code fences if the LLM wrapped its JSON response.\"\"\"\n    m = _JSON_FENCE_RE.search(text)\n    return m.group(1).strip() if m else text.strip()\n\n\ndef _ensure_citation_coverage(sections: ExplanationSections) -> None:\n    \"\"\"Reject synthesized prose when any sentence lacks a citation.\"\"\"\n",
     "186e6da48c9cf874b954bf24d783f1f6bee868d5:git_explainer/tools/github_issue_lookup.py:1:40:30": "from __future__ import annotations\n\nimport re\n\nimport requests\n\nfrom git_explainer.config import GITHUB_API_BASE, GITHUB_TOKEN\n\n_HEADERS: dict[str, str] = {\n    \"Authorization\": f\"token {GITHUB_TOKEN}\",\n    \"Accept\": \"application/vnd.github.v3+json\",\n}\n\n_ISSUE_RE = re.compile(\n    r\"(?:(?:fix(?:es|ed)?|clos(?:es|ed)?|resolv(?:es|ed)?|related\\s+to)\\s+)?#(\\d+)\",\n    re.IGNORECASE,\n)\n\n\ndef fetch_issue(\n    owner: str,\n    repo: str,\n    issue_number: int,\n) -> dict[str, str | int | list[str]] | None:\n    \"\"\"Fetch a single GitHub issue by number. Returns None if not found.\"\"\"\n    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}\"\n    resp = requests.get(url, headers=_HEADERS, timeout=10)\n\n    if resp.status_code == 404:\n        return None\n    if resp.status_code in (401, 403):\n        raise requests.HTTPError(\n            f\"GitHub auth error ({resp.status_code}): check GITHUB_TOKEN\",\n            response=resp,\n        )\n    if resp.status_code == 429:\n        raise requests.HTTPError(\n            \"GitHub rate limit exceeded (429)\", response=resp\n        )\n    resp.raise_for_status()\n\n    data = resp.json()\n    return {\n        \"number\": data[\"number\"],\n        \"title\": data[\"title\"],\n        \"state\": data[\"state\"],\n        \"body\": data[\"body\"] or \"\",\n        \"labels\": [label[\"name\"] for label in data[\"labels\"]],\n        \"created_at\": data[\"created_at\"],\n        \"user\": data[\"user\"][\"login\"],\n    }\n\n\ndef extract_issue_refs(text: str) -> list[int]:\n    \"\"\"Extract deduplicated issue numbers from a commit message.\"\"\"\n    return list(dict.fromkeys(int(m) for m in _ISSUE_RE.findall(text)))\n\n\ndef fetch_issues(\n    owner: str,\n    repo: str,\n    issue_numbers: list[int],\n) -> list[dict[str, str | int | list[str]]]:\n    \"\"\"Fetch multiple issues, skipping any that don't exist.\"\"\"\n    results = []\n    for num in issue_numbers:\n        issue = fetch_issue(owner, repo, num)\n        if issue is not None:\n            results.append(issue)\n    return results\n",
     "1a24a9e7c59dfd36ba5b1f351441766df11bc6bf:git_explainer/tools/commit_range_analyzer.py:268:285:30": "def _fetch_associated_prs(\n    commits: list[RangeCommit],\n    owner: str,\n    repo_name: str,\n) -> list[dict]:\n    \"\"\"Fetch PRs associated with commits, deduplicated.\"\"\"\n    seen: set[int] = set()\n    results: list[dict] = []\n\n    for commit in commits:\n        try:\n            pr_numbers = find_prs_for_commit(owner, repo_name, commit[\"sha\"])\n        except Exception:\n            logger.warning(\"Failed to look up PRs for commit %s\", commit[\"sha\"])\n            continue\n\n        for pr_num in pr_numbers:\n            if pr_num in seen:\n                continue\n            seen.add(pr_num)\n            try:\n                pr_data = fetch_pr(owner, repo_name, pr_num)\n                if pr_data is not None:\n                    results.append(pr_data)\n            except Exception:\n                logger.warning(\"Failed to fetch PR #%d\", pr_num)\n\n    return results\n\n\ndef _fetch_associated_issues(\n    commits: list[RangeCommit],\n    owner: str,\n    repo_name: str,\n) -> list[dict]:\n    \"\"\"Extract issue references from commit messages and fetch them.\"\"\"\n    all_issue_nums: set[int] = set()\n    for commit in commits:\n        all_issue_nums.update(extract_issue_refs(commit[\"message\"]))\n\n    if not all_issue_nums:\n        return []\n\n    try:\n        return fetch_issues(owner, repo_name, sorted(all_issue_nums))\n    except Exception:\n        logger.warning(\"Failed to fetch issues: %s\", sorted(all_issue_nums))\n        return []\n",
     "1a24a9e7c59dfd36ba5b1f351441766df11bc6bf:git_explainer/tools/commit_range_analyzer.py:58:137:30": "    additions: int\n    deletions: int\n\n\nclass RangeAnalysis(TypedDict):\n    base_revision: str\n    head_revision: str\n    total_commits: int\n    commits: list[RangeCommit]\n    aggregate_diff: DiffSummary\n    authors: list[dict[str, str | int]]\n    associated_prs: list[dict]\n    associated_issues: list[dict]\n    date_range: dict[str, str]\n\n\n# ---------------------------------------------------------------------------\n# Regex for parsing --shortstat output\n# ---------------------------------------------------------------------------\n\n_SHORTSTAT_RE = re.compile(\n    r\"(\\d+) files? changed(?:, (\\d+) insertions?\\(\\+\\))?(?:, (\\d+) deletions?\\(-\\))?\"\n)\n\n\n# ---------------------------------------------------------------------------\n# Public API\n# ---------------------------------------------------------------------------\n\n\ndef analyze_range(\n    repo_path: str,\n    range_spec: str,\n    *,\n    owner: str | None = None,\n    repo_name: str | None = None,\n    include_prs: bool = True,\n    include_issues: bool = True,\n    max_commits: int = 200,\n) -> RangeAnalysis:\n    \"\"\"Analyze a range of commits and gather associated metadata.\n\n    Args:\n        repo_path: Absolute path to the local git repository.\n        range_spec: A git revision range, e.g. ``\"v1.0..v1.1\"`` or\n            ``\"main..feature-branch\"``.  Must contain ``..``.\n        owner: GitHub repository owner.  Required when *include_prs* or\n            *include_issues* is True.\n        repo_name: GitHub repository name.  Required when *include_prs* or\n            *include_issues* is True.\n        include_prs: Look up associated PRs via GitHub API.\n        include_issues: Extract and fetch issue references from commit\n            messages.\n        max_commits: Safety limit on commits to process (default 200).\n\n    Raises:\n        ValueError: If *range_spec* has no ``..``, repo path is invalid,\n            or GitHub owner/repo are missing when lookups are requested.\n    \"\"\"\n    base_revision, head_revision = _parse_range_spec(range_spec)\n\n    if (include_prs or include_issues) and (owner is None or repo_name is None):\n        raise ValueError(\n            \"owner and repo_name are required when include_prs or \"\n            \"include_issues is True\"\n        )\n\n    commits = list_range_commits(repo_path, range_spec, max_count=max_commits)\n\n    # Aggregate diff across the full range\n    aggregate_diff = get_diff(\n        repo_path, head_revision, base_revision=base_revision\n    )\n\n    # Author statistics\n    author_counts = Counter(c[\"author\"] for c in commits)\n    authors: list[dict[str, str | int]] = [\n        {\"name\": name, \"commits\": count}\n        for name, count in author_counts.most_common()\n    ]\n\n    # Date range\n    if commits:\n        date_range = {\n            \"earliest\": commits[-1][\"date\"],  # oldest (git log is newest-first)\n            \"latest\": commits[0][\"date\"],\n        }\n    else:\n        date_range = {\"earliest\": \"\", \"latest\": \"\"}\n\n    # GitHub enrichment\n    associated_prs = _fetch_associated_prs(\n        commits, owner, repo_name  # type: ignore[arg-type]\n    ) if include_prs else []\n\n    associated_issues = _fetch_associated_issues(\n        commits, owner, repo_name  # type: ignore[arg-type]\n    ) if include_issues else []\n\n    return RangeAnalysis(\n        base_revision=base_revision,\n        head_revision=head_revision,\n        total_commits=len(commits),\n        commits=commits,\n        aggregate_diff=aggregate_diff,\n        authors=authors,\n        associated_prs=associated_prs,\n        associated_issues=associated_issues,\n        date_range=date_range,\n    )\n\n\ndef list_range_commits(\n    repo_path: str,\n    range_spec: str,\n    *,\n    max_count: int = 200,\n) -> list[RangeCommit]:\n    \"\"\"List commits in a range with per-commit stats.\n\n    A lightweight alternative to :func:`analyze_range` when you only need\n    the commit list and diff stats without GitHub enrichment.\n    \"\"\"\n    # 1) Get commit metadata\n    log_output = run_git(repo_path, [\n        \"log\", \"--format=%h|%an|%ad|%s\", \"--date=short\",\n        f\"-n{max_count}\", range_spec,\n    ])\n\n    raw_commits: list[dict[str, str]] = []\n    for line in log_output.strip().splitlines():\n        if not line:\n            continue\n        sha, author, date, message = line.split(\"|\", 3)\n        raw_commits.append(\n            {\"sha\": sha, \"author\": author, \"date\": date, \"message\": message}\n        )\n\n    if not raw_commits:\n        return []\n",
@@ -18,6 +21,7 @@
     "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/config.py:13:19:30": "\"\"\"Configuration helpers for the Git explainer agent.\"\"\"\n\nfrom __future__ import annotations\n\nimport os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# Environment-backed credentials. We keep module import side effects light so\n# tests and offline workflows can still import the package.\nGITHUB_TOKEN = os.getenv(\"GITHUB_TOKEN\", \"\")\nGROQ_API_KEY = os.getenv(\"GROQ_API_KEY\", \"\")\n\n# Groq / OpenAI-compatible endpoint\nGROQ_BASE_URL = os.getenv(\"GROQ_BASE_URL\", \"https://api.groq.com/openai/v1\")\nGROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")\nGROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))\n\n# GitHub API\nGITHUB_API_BASE = os.getenv(\"GITHUB_API_BASE\", \"https://api.github.com\")\n\n# Agent defaults from the PRD\nDEFAULT_MAX_LINE_SPAN = int(os.getenv(\"GIT_EXPLAINER_MAX_LINE_SPAN\", \"200\"))\nDEFAULT_MAX_COMMITS = int(os.getenv(\"GIT_EXPLAINER_MAX_COMMITS\", \"5\"))\nDEFAULT_CONTEXT_RADIUS = int(os.getenv(\"GIT_EXPLAINER_CONTEXT_RADIUS\", \"30\"))\nCACHE_FILENAME = os.getenv(\"GIT_EXPLAINER_CACHE_FILENAME\", \".git_explainer_cache.json\")\n\n\ndef github_headers(*, accept: str = \"application/vnd.github.v3+json\") -> dict[str, str]:\n    \"\"\"Return GitHub headers with the configured token, if any.\"\"\"\n    return {\n        \"Authorization\": f\"token {GITHUB_TOKEN}\",\n        \"Accept\": accept,\n    }\n\n\ndef has_github_token() -> bool:\n    return bool(GITHUB_TOKEN.strip())\n\n\ndef has_groq_api_key() -> bool:\n    return bool(GROQ_API_KEY.strip())\n",
     "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/guardrails.py:176:185:30": "    if payload.get(\"private\", False):\n        raise ValueError(f\"Private repositories are not supported: {owner}/{repo_name}\")\n    return payload\n\n\ndef should_fetch_file_context(commit_message: str, pr_body: str = \"\") -> bool:\n    \"\"\"Use file context for terse or ambiguous changes.\"\"\"\n    message = commit_message.strip()\n    if len(message) < 24:\n        return True\n    if _GENERIC_MESSAGE_RE.search(message):\n        return True\n    if pr_body and len(pr_body.strip()) >= 40:\n        return False\n    return \"#\" not in message and \":\" not in message\n",
     "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/guardrails.py:41:60:30": "from git_explainer import config\nfrom git_explainer.tools.file_context_reader import read_file_at_revision\nfrom git_explainer.tools.git_utils import run_git\n\n_GENERIC_MESSAGE_RE = re.compile(\n    r\"\\b(fix|update|cleanup|refactor|format|lint|tweak|changes?|misc|wip)\\b\",\n    re.IGNORECASE,\n)\n_GITHUB_REMOTE_RE = re.compile(\n    r\"github\\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\\.git)?$\"\n)\n\n\n@dataclass(slots=True)\nclass ExplainerQuery:\n    repo_path: str\n    file_path: str\n    start_line: int\n    end_line: int\n    owner: str | None = None\n    repo_name: str | None = None\n    max_commits: int = config.DEFAULT_MAX_COMMITS\n    context_radius: int = config.DEFAULT_CONTEXT_RADIUS\n    enforce_public_repo: bool = False\n\n    def to_dict(self) -> dict[str, str | int | bool | None]:\n        return asdict(self)\n\n\ndef validate_query(query: ExplainerQuery) -> ExplainerQuery:\n    \"\"\"Validate and normalize a query before orchestration begins.\"\"\"\n    repo = Path(query.repo_path).expanduser().resolve()\n    if not repo.is_dir() or not (repo / \".git\").exists():\n        raise ValueError(f\"Not a git repository: {repo}\")\n\n    if query.start_line <= 0 or query.end_line <= 0:\n        raise ValueError(\"Line numbers must be positive integers\")\n    if query.end_line < query.start_line:\n        raise ValueError(\"end_line must be greater than or equal to start_line\")\n\n    span = query.end_line - query.start_line + 1\n    if span > config.DEFAULT_MAX_LINE_SPAN:\n        raise ValueError(\n            f\"Requested line range spans {span} lines; maximum is \"\n            f\"{config.DEFAULT_MAX_LINE_SPAN}\"\n        )\n\n    file_path = normalize_file_path(str(repo), query.file_path)\n    file_text = read_file_at_revision(str(repo), file_path, revision=\"HEAD\")\n    if file_text is None:\n        file_text = read_file_at_revision(str(repo), file_path)\n    if file_text is None:\n        raise ValueError(f\"File not found in repository: {file_path}\")\n    if file_text == \"[binary file]\":\n        raise ValueError(f\"Binary files are not supported: {file_path}\")\n\n    line_count = len(file_text.splitlines())\n    if query.end_line > line_count:\n        raise ValueError(\n            f\"Requested end_line {query.end_line} exceeds file length {line_count}\"\n        )\n\n    owner = query.owner\n    repo_name = query.repo_name\n    if owner is None or repo_name is None:\n        inferred = infer_github_repo(str(repo))\n        if inferred is not None:\n            owner = owner or inferred[0]\n            repo_name = repo_name or inferred[1]\n\n    normalized = ExplainerQuery(\n        repo_path=str(repo),\n        file_path=file_path,\n        start_line=query.start_line,\n        end_line=query.end_line,\n        owner=owner,\n        repo_name=repo_name,\n        max_commits=max(1, min(query.max_commits, 20)),\n        context_radius=max(0, min(query.context_radius, 200)),\n        enforce_public_repo=query.enforce_public_repo,\n",
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/orchestrator.py:301:391:30": "\n        summary = f\"{what_changed} {why}\"\n        return ExplanationSections(\n            what_changed=what_changed,\n            why=why,\n            tradeoffs=tradeoffs,\n            limitations=limitations,\n            summary=summary,\n        )\n\n    def _normalize_sections(self, data: dict[str, Any]) -> ExplanationSections:\n        return ExplanationSections(\n            what_changed=str(data[\"what_changed\"]).strip(),\n            why=str(data[\"why\"]).strip(),\n            tradeoffs=str(data[\"tradeoffs\"]).strip(),\n            limitations=str(data[\"limitations\"]).strip(),\n            summary=str(data[\"summary\"]).strip(),\n        )\n\n    def _context_cache_key(self, query: ExplainerQuery, sha: str) -> str:\n        return (\n            f\"{sha}:{query.file_path}:{query.start_line}:{query.end_line}:\"\n            f\"{query.context_radius}\"\n        )\n\n\ndef explain_code_history(\n    repo_path: str,\n    file_path: str,\n    start_line: int,\n    end_line: int,\n    *,\n    owner: str | None = None,\n    repo_name: str | None = None,\n    max_commits: int = 5,\n    context_radius: int = 30,\n    enforce_public_repo: bool = False,\n    use_llm: bool = True,\n) -> ExplanationResult:\n    \"\"\"Convenience wrapper around :class:`GitExplainerAgent`.\"\"\"\n    agent = GitExplainerAgent(use_llm=use_llm)\n    query = ExplainerQuery(\n        repo_path=repo_path,\n        file_path=file_path,\n        start_line=start_line,\n        end_line=end_line,\n        owner=owner,\n        repo_name=repo_name,\n        max_commits=max_commits,\n        context_radius=context_radius,\n        enforce_public_repo=enforce_public_repo,\n    )\n    return agent.explain(query)\n",
     "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/tools/github_issue_lookup.py:1:40:30": "from __future__ import annotations\n\nimport re\nimport time\n\nimport requests\n\nfrom git_explainer.config import GITHUB_API_BASE, github_headers\n\n_HEADERS: dict[str, str] = github_headers()\n\n_ISSUE_RE = re.compile(\n    r\"(?:(?:fix(?:es|ed)?|clos(?:es|ed)?|resolv(?:es|ed)?|related\\s+to)\\s+)?#(\\d+)\",\n    re.IGNORECASE,\n)\n\n\ndef fetch_issue(\n    owner: str,\n    repo: str,\n    issue_number: int,\n) -> dict[str, str | int | list[str]] | None:\n    \"\"\"Fetch a single GitHub issue by number. Returns None if not found.\"\"\"\n    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}\"\n    resp = _get(url)\n\n    if resp.status_code == 404:\n        return None\n    if resp.status_code in (401, 403):\n        raise requests.HTTPError(\n            f\"GitHub auth error ({resp.status_code}): check GITHUB_TOKEN\",\n            response=resp,\n        )\n    if resp.status_code == 429:\n        raise requests.HTTPError(\n            \"GitHub rate limit exceeded (429)\", response=resp\n        )\n    resp.raise_for_status()\n\n    data = resp.json()\n    return {\n        \"number\": data[\"number\"],\n        \"title\": data[\"title\"],\n        \"state\": data[\"state\"],\n        \"body\": data[\"body\"] or \"\",\n        \"labels\": [label[\"name\"] for label in data[\"labels\"]],\n        \"created_at\": data[\"created_at\"],\n        \"user\": data[\"user\"][\"login\"],\n    }\n\n\ndef fetch_issue_comments(owner: str, repo: str, issue_number: int) -> list[dict[str, str]]:\n    \"\"\"Fetch issue comments (first page, up to 30).\"\"\"\n    url = f\"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments\"\n    resp = _get(url)\n    if resp.status_code == 404:\n        return []\n    resp.raise_for_status()\n    return [\n        {\n            \"user\": comment[\"user\"][\"login\"],\n            \"body\": comment[\"body\"],\n            \"created_at\": comment[\"created_at\"],\n        }\n        for comment in resp.json()\n    ]\n\n\ndef extract_issue_refs(text: str) -> list[int]:\n    \"\"\"Extract deduplicated issue numbers from a commit message.\"\"\"\n",
     "4c711bfc4861f860a0cb2e3b7e78739df5f25339:git_explainer/config.py:13:19:30": "import os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# --- Required (fail fast if missing) ---\nGITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]\nGROQ_API_KEY = os.environ[\"GROQ_API_KEY\"]\n\n# --- Groq API settings (OpenAI-compatible endpoint) ---\nGROQ_BASE_URL = \"https://api.groq.com/openai/v1\"\nGROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")\nGROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))\n\n# --- GitHub API ---\nGITHUB_API_BASE = \"https://api.github.com\"\n",
     "628ef3cecd7deeb57b0101f1707b2cb7f724acba:git_explainer/config.py:13:19:30": "import os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# --- Required (fail fast if missing) ---\nGITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]\nKIMI_API_KEY = os.environ[\"KIMI_API_KEY\"]\n\n# --- Kimi API settings ---\nKIMI_BASE_URL = \"https://api.moonshot.cn/v1\"\nKIMI_MODEL = os.getenv(\"KIMI_MODEL\", \"moonshot-v1-8k\")\nKIMI_MAX_TOKENS = int(os.getenv(\"KIMI_MAX_TOKENS\", \"4096\"))\n\n# --- GitHub API ---\nGITHUB_API_BASE = \"https://api.github.com\"\n",
@@ -26,10 +30,164 @@
     "b05641e9b7826896cbcb06e9de33c21498fef113:README.md:1:32:30": "# Git Explainer Agent\n\nThis project implements a Git explainer agent that answers: why does this code exist?\n\nGiven a local repository and either a line range or a natural-language question, the agent:\n\n- traces the relevant commits with `git log -L`\n- looks up associated pull requests and linked issues on GitHub\n- fetches review comments and issue comments\n- optionally reads surrounding file context when commit metadata is ambiguous\n- can resolve a question like \"Why is requests used for GitHub issue lookups?\" into a concrete file and line span before tracing history\n- synthesizes a cited explanation, with a deterministic fallback when no LLM is configured\n\n## CLI\n\n```bash\npython3 main.py /path/to/repo src/app.py 10 25 --owner octocat --repo-name hello\n```\n\nQuestion mode works without line numbers:\n\n```bash\npython3 main.py /path/to/repo --question \"Why is requests used for GitHub issue lookups?\"\n```\n\nYou can also provide a file hint in question mode to narrow the search:\n\n```bash\npython3 main.py /path/to/repo git_explainer/tools/github_issue_lookup.py --question \"Why is requests used here?\"\n```\n\nAdd `--no-llm` to force the fallback summary and `--enforce-public-repo` to reject private or missing GitHub repos.\n",
     "b05641e9b7826896cbcb06e9de33c21498fef113:eval/benchmark.json:229:240:30": "    \"end_line\": 15,\n    \"max_commits\": 5,\n    \"use_llm\": false,\n    \"expected\": {\n      \"min_commits\": 1,\n      \"commit_message_contains\": [],\n      \"pr_numbers\": [],\n      \"issue_numbers\": [],\n      \"explanation_contains\": [\"api.py\"],\n      \"used_fallback\": true\n    },\n    \"tags\": [\"external-repo\", \"fallback\"]\n  },\n  {\n    \"id\": \"question-issue-lookup-library\",\n    \"description\": \"Natural-language query that asks why requests is used for GitHub issue lookups\",\n    \"repo_url\": \"https://github.com/AndreiPiterbarg/CIS_1990_Final_Project\",\n    \"owner\": \"AndreiPiterbarg\",\n    \"repo_name\": \"CIS_1990_Final_Project\",\n    \"question\": \"Why is requests used for GitHub issue lookups?\",\n    \"max_commits\": 5,\n    \"use_llm\": false,\n    \"expected\": {\n      \"resolved_file_path\": \"git_explainer/tools/github_issue_lookup.py\",\n      \"resolved_preview_contains\": [\"import requests\", \"fetch_issue\"],\n      \"min_commits\": 1,\n      \"commit_message_contains\": [\"Add GitHub issue and PR lookup\"],\n      \"used_fallback\": true\n    },\n    \"tags\": [\"question-mode\", \"library-usage\", \"fallback\"]\n  },\n  {\n    \"id\": \"question-file-context-heuristic\",\n    \"description\": \"Natural-language query that asks how the agent decides to fetch surrounding file context\",\n    \"repo_url\": \"https://github.com/AndreiPiterbarg/CIS_1990_Final_Project\",\n    \"owner\": \"AndreiPiterbarg\",\n    \"repo_name\": \"CIS_1990_Final_Project\",\n    \"question\": \"How does the agent decide when to fetch surrounding file context?\",\n    \"max_commits\": 5,\n    \"use_llm\": false,\n    \"expected\": {\n      \"resolved_file_path\": \"git_explainer/guardrails.py\",\n      \"resolved_preview_contains\": [\"should_fetch_file_context\", \"_GENERIC_MESSAGE_RE\"],\n      \"min_commits\": 1,\n      \"commit_message_contains\": [\"initial mockup\"],\n      \"used_fallback\": true\n    },\n    \"tags\": [\"question-mode\", \"file-context-fetch\", \"fallback\"]\n  }\n]\n",
     "b05641e9b7826896cbcb06e9de33c21498fef113:git_explainer/guardrails.py:41:60:30": "from git_explainer import config\nfrom git_explainer.tools.file_context_reader import read_file_at_revision\nfrom git_explainer.tools.git_utils import run_git\n\n_GENERIC_MESSAGE_RE = re.compile(\n    r\"\\b(fix|update|cleanup|refactor|format|lint|tweak|changes?|misc|wip)\\b\",\n    re.IGNORECASE,\n)\n_GITHUB_REMOTE_RE = re.compile(\n    r\"github\\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\\.git)?$\"\n)\n\n\n@dataclass(slots=True)\nclass ExplainerQuery:\n    repo_path: str\n    file_path: str | None = None\n    start_line: int | None = None\n    end_line: int | None = None\n    question: str | None = None\n    owner: str | None = None\n    repo_name: str | None = None\n    max_commits: int = config.DEFAULT_MAX_COMMITS\n    context_radius: int = config.DEFAULT_CONTEXT_RADIUS\n    enforce_public_repo: bool = False\n\n    def to_dict(self) -> dict[str, str | int | bool | None]:\n        return asdict(self)\n\n\ndef validate_query(query: ExplainerQuery) -> ExplainerQuery:\n    \"\"\"Validate and normalize a query before orchestration begins.\"\"\"\n    repo = Path(query.repo_path).expanduser().resolve()\n    if not repo.is_dir() or not (repo / \".git\").exists():\n        raise ValueError(f\"Not a git repository: {repo}\")\n\n    question = query.question.strip() if query.question is not None else None\n    question = question or None\n\n    file_path: str | None = None\n    if query.file_path is not None:\n        file_path = normalize_file_path(str(repo), query.file_path)\n\n    if question is not None:\n        if query.start_line is not None or query.end_line is not None:\n            raise ValueError(\"question mode does not accept start_line or end_line\")\n        if file_path is not None:\n            _read_text_file(str(repo), file_path)\n        start_line = None\n        end_line = None\n    else:\n        if file_path is None or query.start_line is None or query.end_line is None:\n            raise ValueError(\n                \"Provide file_path, start_line, and end_line, or use question mode\"\n            )\n        if query.start_line <= 0 or query.end_line <= 0:\n            raise ValueError(\"Line numbers must be positive integers\")\n        if query.end_line < query.start_line:\n            raise ValueError(\"end_line must be greater than or equal to start_line\")\n\n        span = query.end_line - query.start_line + 1\n        if span > config.DEFAULT_MAX_LINE_SPAN:\n            raise ValueError(\n                f\"Requested line range spans {span} lines; maximum is \"\n                f\"{config.DEFAULT_MAX_LINE_SPAN}\"\n            )\n\n        line_count = len(_read_text_file(str(repo), file_path).splitlines())\n        if query.end_line > line_count:\n            raise ValueError(\n                f\"Requested end_line {query.end_line} exceeds file length {line_count}\"\n            )\n        start_line = query.start_line\n        end_line = query.end_line\n\n    owner = query.owner\n    repo_name = query.repo_name\n    if owner is None or repo_name is None:\n        inferred = infer_github_repo(str(repo))\n        if inferred is not None:\n",
+    "b05641e9b7826896cbcb06e9de33c21498fef113:git_explainer/orchestrator.py:301:391:30": "                        prompt,\n                        system_prompt=SYSTEM_PROMPT,\n                        temperature=0.1,\n                    )\n                    parsed = json.loads(_extract_json(response))\n                    if not self._REQUIRED_KEYS.issubset(parsed.keys()):\n                        continue\n                    return self._normalize_sections(parsed), False\n                except (LLMUnavailableError, json.JSONDecodeError, KeyError, TypeError, ValueError):\n                    if attempt == 1:\n                        break\n\n        return self._fallback_summary(query, evidence), True\n\n    def _fallback_summary(\n        self,\n        query: ExplainerQuery,\n        evidence: dict[str, Any],\n    ) -> ExplanationSections:\n        commits = evidence[\"commits\"]\n        pull_requests = evidence[\"pull_requests\"]\n        issues = evidence[\"issues\"]\n        contexts = evidence[\"file_contexts\"]\n        diffs = evidence.get(\"diffs\", [])\n\n        commit_citations = \" \".join(f\"[commit:{c['sha']}]\" for c in commits[:3]) or \"[commit:none]\"\n        pr_citations = \" \".join(f\"[pr:#{pr['number']}]\" for pr in pull_requests[:2])\n        issue_citations = \" \".join(f\"[issue:#{issue['number']}]\" for issue in issues[:2])\n        selection = _describe_selection(query)\n\n        if commits:\n            what_changed = (\n                f\"{selection} \"\n                f\"were most recently shaped by {len(commits)} traced commit(s): \"\n                + \"; \".join(f\"{c['sha']} ({c['message']})\" for c in commits[:3])\n                + f\". {commit_citations}\"\n            )\n            if diffs:\n                diff_total_adds = sum(\n                    len([l for l in h[\"changes\"] if l.startswith(\"+\")])\n                    for d in diffs for h in d.get(\"hunks\", [])\n                )\n                diff_total_dels = sum(\n                    len([l for l in h[\"changes\"] if l.startswith(\"-\")])\n                    for d in diffs for h in d.get(\"hunks\", [])\n                )\n                what_changed += (\n                    f\" The diffs show {diff_total_adds} addition(s) and \"\n                    f\"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s).\"\n                )\n        else:\n            what_changed = (\n                f\"No line-history commits were found for {selection}. \"\n                \"[commit:none]\"\n            )\n\n        if pull_requests or issues:\n            why_parts: list[str] = []\n            if pull_requests:\n                why_parts.append(\n                    \"Related pull requests suggest the intent was \"\n                    + \"; \".join(f\"#{pr['number']} ({pr['title']})\" for pr in pull_requests[:2])\n                )\n            if issues:\n                why_parts.append(\n                    \"Linked issues add context from \"\n                    + \"; \".join(f\"#{issue['number']} ({issue['title']})\" for issue in issues[:2])\n                )\n            why = \". \".join(why_parts) + \". \" + \" \".join(x for x in [pr_citations, issue_citations] if x)\n        else:\n            why = (\n                \"No linked pull request or issue metadata was found, so the intent can only be inferred \"\n                f\"from commit messages and surrounding code. {commit_citations}\"\n            )\n\n        if contexts:\n            tradeoffs = (\n                f\"Surrounding file context was fetched for {len(contexts)} commit(s), which suggests the change \"\n                \"needed additional local context beyond the commit message. Explicit trade-offs were not clearly \"\n                f\"documented in the fetched metadata. {commit_citations}\"\n            )\n        else:\n            tradeoffs = (\n                \"The retrieved PRs and issues did not spell out clear trade-offs, so no stronger claim is made \"\n                f\"beyond the available commit and PR evidence. {' '.join(x for x in [commit_citations, pr_citations] if x)}\"\n            )\n\n        limitations = (\n            \"This explanation is limited to the traced commits, associated pull requests, linked issues, \"\n            \"and any fetched file context. If a change was discussed elsewhere, it will not appear here. \"\n            f\"{' '.join(x for x in [commit_citations, pr_citations, issue_citations] if x)}\"\n        )\n\n        summary = f\"{what_changed} {why}\"\n        return ExplanationSections(\n            what_changed=what_changed,\n            why=why,\n            tradeoffs=tradeoffs,\n            limitations=limitations,\n            summary=summary,\n        )\n\n    def _normalize_sections(self, data: dict[str, Any]) -> ExplanationSections:\n        return ExplanationSections(\n            what_changed=str(data[\"what_changed\"]).strip(),\n            why=str(data[\"why\"]).strip(),\n            tradeoffs=str(data[\"tradeoffs\"]).strip(),\n            limitations=str(data[\"limitations\"]).strip(),\n            summary=str(data[\"summary\"]).strip(),\n        )\n\n    def _context_cache_key(self, query: ExplainerQuery, sha: str) -> str:\n        return (\n            f\"{sha}:{query.file_path}:{query.start_line}:{query.end_line}:\"\n            f\"{query.context_radius}\"\n        )\n\n\n_JSON_FENCE_RE = re.compile(r\"```(?:json)?\\s*\\n(.*?)\\n```\", re.DOTALL)\n\n\ndef _extract_json(text: str) -> str:\n    \"\"\"Strip markdown code fences if the LLM wrapped its JSON response.\"\"\"\n    m = _JSON_FENCE_RE.search(text)\n    return m.group(1).strip() if m else text.strip()\n\n\n_MAX_DIFF_LINES = 80\n\n\ndef _compact_diff(diff_summary: dict[str, Any], short_sha: str) -> dict[str, Any]:\n    \"\"\"Flatten a DiffSummary into a compact dict for evidence and caching.\"\"\"\n    hunks: list[dict[str, Any]] = []\n    for file_diff in diff_summary.get(\"files\", []):\n        for hunk in file_diff.get(\"hunks\", []):\n            lines = []\n            for hl in hunk.get(\"lines\", []):\n                if hl[\"type\"] == \"add\":\n                    lines.append(f\"+{hl['content']}\")\n                elif hl[\"type\"] == \"delete\":\n                    lines.append(f\"-{hl['content']}\")\n            if lines:\n                hunks.append({\n                    \"header\": hunk[\"header\"],\n                    \"changes\": lines[:_MAX_DIFF_LINES],\n                })\n    return {\"commit_sha\": short_sha, \"hunks\": hunks}\n\n\ndef explain_code_history(\n    repo_path: str,\n",
+    "df17b4f23410af49d10a0f563671216d32b8d4c3:git_explainer/orchestrator.py:301:391:30": "        if commits:\n            what_changed = (\n                f\"The selected lines in {query.file_path}:{query.start_line}-{query.end_line} \"\n                f\"were most recently shaped by {len(commits)} traced commit(s): \"\n                + \"; \".join(f\"{c['sha']} ({c['message']})\" for c in commits[:3])\n                + f\". {commit_citations}\"\n            )\n            if diffs:\n                diff_total_adds = sum(\n                    len([l for l in h[\"changes\"] if l.startswith(\"+\")])\n                    for d in diffs for h in d.get(\"hunks\", [])\n                )\n                diff_total_dels = sum(\n                    len([l for l in h[\"changes\"] if l.startswith(\"-\")])\n                    for d in diffs for h in d.get(\"hunks\", [])\n                )\n                what_changed += (\n                    f\" The diffs show {diff_total_adds} addition(s) and \"\n                    f\"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s).\"\n                )\n        else:\n            what_changed = (\n                f\"No line-history commits were found for {query.file_path}:{query.start_line}-{query.end_line}. \"\n                \"[commit:none]\"\n            )\n\n        if pull_requests or issues:\n            why_parts: list[str] = []\n            if pull_requests:\n                why_parts.append(\n                    \"Related pull requests suggest the intent was \"\n                    + \"; \".join(f\"#{pr['number']} ({pr['title']})\" for pr in pull_requests[:2])\n                )\n            if issues:\n                why_parts.append(\n                    \"Linked issues add context from \"\n                    + \"; \".join(f\"#{issue['number']} ({issue['title']})\" for issue in issues[:2])\n                )\n            why = \". \".join(why_parts) + \". \" + \" \".join(x for x in [pr_citations, issue_citations] if x)\n        else:\n            why = (\n                \"No linked pull request or issue metadata was found, so the intent can only be inferred \"\n                f\"from commit messages and surrounding code. {commit_citations}\"\n            )\n\n        if contexts:\n            tradeoffs = (\n                f\"Surrounding file context was fetched for {len(contexts)} commit(s), which suggests the change \"\n                \"needed additional local context beyond the commit message. Explicit trade-offs were not clearly \"\n                f\"documented in the fetched metadata. {commit_citations}\"\n            )\n        else:\n            tradeoffs = (\n                \"The retrieved PRs and issues did not spell out clear trade-offs, so no stronger claim is made \"\n                f\"beyond the available commit and PR evidence. {' '.join(x for x in [commit_citations, pr_citations] if x)}\"\n            )\n\n        limitations = (\n            \"This explanation is limited to the traced commits, associated pull requests, linked issues, \"\n            \"and any fetched file context. If a change was discussed elsewhere, it will not appear here. \"\n            f\"{' '.join(x for x in [commit_citations, pr_citations, issue_citations] if x)}\"\n        )\n\n        summary = f\"{what_changed} {why}\"\n        return ExplanationSections(\n            what_changed=what_changed,\n            why=why,\n            tradeoffs=tradeoffs,\n            limitations=limitations,\n            summary=summary,\n        )\n\n    def _normalize_sections(self, data: dict[str, Any]) -> ExplanationSections:\n        return ExplanationSections(\n            what_changed=str(data[\"what_changed\"]).strip(),\n            why=str(data[\"why\"]).strip(),\n            tradeoffs=str(data[\"tradeoffs\"]).strip(),\n            limitations=str(data[\"limitations\"]).strip(),\n            summary=str(data[\"summary\"]).strip(),\n        )\n\n    def _context_cache_key(self, query: ExplainerQuery, sha: str) -> str:\n        return (\n            f\"{sha}:{query.file_path}:{query.start_line}:{query.end_line}:\"\n            f\"{query.context_radius}\"\n        )\n\n\n_JSON_FENCE_RE = re.compile(r\"```(?:json)?\\s*\\n(.*?)\\n```\", re.DOTALL)\n\n\ndef _extract_json(text: str) -> str:\n    \"\"\"Strip markdown code fences if the LLM wrapped its JSON response.\"\"\"\n    m = _JSON_FENCE_RE.search(text)\n    return m.group(1).strip() if m else text.strip()\n\n\n_MAX_DIFF_LINES = 80\n\n\ndef _compact_diff(diff_summary: dict[str, Any], short_sha: str) -> dict[str, Any]:\n    \"\"\"Flatten a DiffSummary into a compact dict for evidence and caching.\"\"\"\n    hunks: list[dict[str, Any]] = []\n    for file_diff in diff_summary.get(\"files\", []):\n        for hunk in file_diff.get(\"hunks\", []):\n            lines = []\n            for hl in hunk.get(\"lines\", []):\n                if hl[\"type\"] == \"add\":\n                    lines.append(f\"+{hl['content']}\")\n                elif hl[\"type\"] == \"delete\":\n                    lines.append(f\"-{hl['content']}\")\n            if lines:\n                hunks.append({\n                    \"header\": hunk[\"header\"],\n                    \"changes\": lines[:_MAX_DIFF_LINES],\n                })\n    return {\"commit_sha\": short_sha, \"hunks\": hunks}\n\n\ndef explain_code_history(\n    repo_path: str,\n    file_path: str,\n    start_line: int,\n    end_line: int,\n    *,\n    owner: str | None = None,\n    repo_name: str | None = None,\n    max_commits: int = 5,\n    context_radius: int = 30,\n    enforce_public_repo: bool = False,\n    use_llm: bool = True,\n) -> ExplanationResult:\n    \"\"\"Convenience wrapper around :class:`GitExplainerAgent`.\"\"\"\n    agent = GitExplainerAgent(use_llm=use_llm)\n    query = ExplainerQuery(\n        repo_path=repo_path,\n        file_path=file_path,\n        start_line=start_line,\n        end_line=end_line,\n        owner=owner,\n        repo_name=repo_name,\n        max_commits=max_commits,\n        context_radius=context_radius,\n        enforce_public_repo=enforce_public_repo,\n    )\n    return agent.explain(query)\n",
     "fbcff04af33e759cc09fcf9bdc0544c982342eaf:eval/evaluate.py:325:352:30": "    )\n    parser.add_argument(\n        \"--results-file\",\n        type=Path,\n        default=Path(\"eval/results.json\"),\n        help=\"Path to write results JSON (default: eval/results.json).\",\n    )\n    return parser\n\n\ndef main(argv: list[str] | None = None) -> None:\n    \"\"\"Entry point for the evaluation harness.\"\"\"\n    args = build_parser().parse_args(argv)\n\n    cases = load_benchmark(args.benchmark_file)\n    cases = filter_cases(cases, tags=args.tags, ids=args.ids)\n\n    if not cases:\n        print(\"No cases to run after filtering.\")\n        sys.exit(0)\n\n    print(f\"Setting up repos for {len(cases)} case(s)...\")\n    repo_map = setup_repos(cases)\n\n    scores: list[CaseScore] = []\n    total_start = time.monotonic()\n\n    for i, case in enumerate(cases, 1):\n        print(f\"[{i}/{len(cases)}] Running {case.id}...\")\n        repo_path = repo_map.get(case.repo_url, \"\")\n        score = run_case(case, repo_path, no_llm=args.no_llm)\n        scores.append(score)\n\n    total_elapsed = time.monotonic() - total_start\n\n    print_report(scores, total_elapsed)\n    save_results(scores, args.results_file)\n    print(f\"\\nResults written to {args.results_file}\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
     "fbcff04af33e759cc09fcf9bdc0544c982342eaf:eval/evaluate.py:85:92:30": "        )\n\n\n@dataclass\nclass CaseScore:\n    \"\"\"Result of scoring a single benchmark case.\"\"\"\n\n    case_id: str\n    passed: bool\n    checks: dict[str, bool]\n    elapsed_seconds: float\n    error: str | None = None\n\n\ndef load_benchmark(path: Path) -> list[BenchmarkCase]:\n    \"\"\"Load and parse benchmark cases from a JSON file.\"\"\"\n    if not path.exists():\n        print(f\"Benchmark file not found: {path}\")\n        sys.exit(1)\n\n    data = json.loads(path.read_text(encoding=\"utf-8\"))\n    if not data:\n        print(f\"Benchmark file is empty: {path}\")\n        sys.exit(1)\n\n    return [BenchmarkCase.from_dict(case) for case in data]\n\n\ndef _is_local_repo(repo_url: str) -> bool:\n    \"\"\"Return True if the repo_url points to the current project.\"\"\"\n    cwd = Path.cwd().resolve()\n    try:\n        candidate = Path(repo_url).resolve()\n        return candidate == cwd\n    except (OSError, ValueError):\n        return False\n\n\ndef setup_repos(cases: list[BenchmarkCase]) -> dict[str, str]:\n    \"\"\"Clone (or reuse) repos for all unique repo_urls. Returns url -> local path.\"\"\"\n    repo_map: dict[str, str] = {}\n    for case in cases:\n        url = case.repo_url\n        if url in repo_map:\n            continue\n        if _is_local_repo(url):\n            repo_map[url] = str(Path.cwd())\n        else:\n            dest = tempfile.mkdtemp(prefix=\"eval_repo_\")\n            try:\n                subprocess.run(\n                    [\"git\", \"clone\", \"--depth\", \"50\", url, dest],\n                    check=True,\n                    capture_output=True,\n                    text=True,\n                )\n                repo_map[url] = dest\n            except subprocess.CalledProcessError as exc:\n                print(f\"WARNING: Failed to clone {url}: {exc.stderr.strip()}\")\n                repo_map[url] = \"\"  # empty string signals clone failure\n    return repo_map\n\n\ndef score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -> CaseScore:\n    \"\"\"Score an agent result against expected values from the benchmark case.\"\"\"\n    expected = case.expected\n    checks: dict[str, bool] = {}\n\n"
   },
   "diffs": {
+    "147ecc534ce6f9a1ac6893ca5bae9a8dbf6c889a:git_explainer/orchestrator.py": {
+      "commit_sha": "147ecc5",
+      "hunks": [
+        {
+          "changes": [
+            "+class CitationCoverageError(ValueError):",
+            "+    \"\"\"Raised when a synthesized explanation contains uncited prose.\"\"\"",
+            "+",
+            "+"
+          ],
+          "header": "@@ -55,2 +55,6 @@ class ExplanationResult(TypedDict):"
+        },
+        {
+          "changes": [
+            "-                            \"Your previous response was not valid JSON. \"",
+            "+                            \"Your previous response failed validation. \"",
+            "-                            \"limitations, summary.\\n\\n\" + prompt",
+            "+                            \"limitations, summary. Every sentence in every \"",
+            "+                            \"section must include at least one bracketed \"",
+            "+                            \"citation like [commit:abc1234], [pr:#42], or \"",
+            "+                            \"[issue:#101].\\n\\n\" + prompt"
+          ],
+          "header": "@@ -264,6 +268,9 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                    return self._normalize_sections(parsed), False",
+            "-                except (LLMUnavailableError, json.JSONDecodeError, KeyError, TypeError, ValueError):",
+            "+                    normalized = self._normalize_sections(parsed)",
+            "+                    _ensure_citation_coverage(normalized)",
+            "+                    return normalized, False",
+            "+                except (",
+            "+                    CitationCoverageError,",
+            "+                    LLMUnavailableError,",
+            "+                    json.JSONDecodeError,",
+            "+                    KeyError,",
+            "+                    TypeError,",
+            "+                    ValueError,",
+            "+                ):"
+          ],
+          "header": "@@ -277,4 +284,13 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                + f\". {commit_citations}\"",
+            "+                + f\" {commit_citations}.\""
+          ],
+          "header": "@@ -305,3 +321,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                    f\"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s).\"",
+            "+                    f\"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s) \"",
+            "+                    f\"{commit_citations}.\""
+          ],
+          "header": "@@ -318,3 +334,4 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                f\"No line-history commits were found for {selection}. \"",
+            "-                \"[commit:none]\"",
+            "+                f\"No line-history commits were found for {selection} [commit:none].\""
+          ],
+          "header": "@@ -322,4 +339,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+                    + f\" {pr_citations}.\""
+          ],
+          "header": "@@ -332,2 +348,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+                    + f\" {issue_citations}.\"",
+            "-            why = \". \".join(why_parts) + \". \" + \" \".join(x for x in [pr_citations, issue_citations] if x)",
+            "+            why = \" \".join(why_parts)"
+          ],
+          "header": "@@ -337,4 +354,5 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                f\"from commit messages and surrounding code. {commit_citations}\"",
+            "+                f\"from commit messages and surrounding code {commit_citations}.\""
+          ],
+          "header": "@@ -342,3 +360,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                \"needed additional local context beyond the commit message. Explicit trade-offs were not clearly \"",
+            "-                f\"documented in the fetched metadata. {commit_citations}\"",
+            "+                f\"needed additional local context beyond the commit message {commit_citations}. \"",
+            "+                \"Explicit trade-offs were not clearly documented in the fetched metadata \"",
+            "+                f\"{commit_citations}.\""
+          ],
+          "header": "@@ -348,4 +366,5 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                f\"beyond the available commit and PR evidence. {' '.join(x for x in [commit_citations, pr_citations] if x)}\"",
+            "+                f\"beyond the available commit and PR evidence \"",
+            "+                f\"{' '.join(x for x in [commit_citations, pr_citations] if x)}.\""
+          ],
+          "header": "@@ -354,3 +373,4 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-            \"and any fetched file context. If a change was discussed elsewhere, it will not appear here. \"",
+            "-            f\"{' '.join(x for x in [commit_citations, pr_citations, issue_citations] if x)}\"",
+            "+            \"and any fetched file context; if a change was discussed elsewhere, it will not appear here \"",
+            "+            f\"{' '.join(x for x in [commit_citations, pr_citations, issue_citations] if x)}.\""
+          ],
+          "header": "@@ -359,4 +379,4 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+_CITATION_RE = re.compile(r\"\\[(?:commit:(?:[0-9a-f]{7,40}|none)|pr:#\\d+|issue:#\\d+)\\]\")",
+            "+_SENTENCE_RE = re.compile(r\"(?<=[.!?])\\s+|\\n+\")"
+          ],
+          "header": "@@ -389,2 +409,4 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+def _ensure_citation_coverage(sections: ExplanationSections) -> None:",
+            "+    \"\"\"Reject synthesized prose when any sentence lacks a citation.\"\"\"",
+            "+    for section_name, text in sections.items():",
+            "+        if not _CITATION_RE.search(text):",
+            "+            raise CitationCoverageError(",
+            "+                f\"Section {section_name!r} is missing bracketed citations\"",
+            "+            )",
+            "+",
+            "+        for sentence in _SENTENCE_RE.split(text.strip()):",
+            "+            if not sentence.strip():",
+            "+                continue",
+            "+            if not _sentence_needs_citation(sentence):",
+            "+                continue",
+            "+            if not _CITATION_RE.search(sentence):",
+            "+                raise CitationCoverageError(",
+            "+                    f\"Section {section_name!r} contains uncited prose: {sentence!r}\"",
+            "+                )",
+            "+",
+            "+",
+            "+def _sentence_needs_citation(sentence: str) -> bool:",
+            "+    plain = _CITATION_RE.sub(\"\", sentence)",
+            "+    plain = re.sub(r\"[\\s\\W_]+\", \"\", plain)",
+            "+    return bool(plain)",
+            "+",
+            "+"
+          ],
+          "header": "@@ -397,2 +419,27 @@ def _extract_json(text: str) -> str:"
+        }
+      ]
+    },
     "186e6da48c9cf874b954bf24d783f1f6bee868d5:git_explainer/tools/github_issue_lookup.py": {
       "commit_sha": "186e6da",
       "hunks": [
@@ -377,6 +535,96 @@
             "+"
           ],
           "header": "@@ -0,0 +1,160 @@"
+        }
+      ]
+    },
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/orchestrator.py": {
+      "commit_sha": "3870c34",
+      "hunks": [
+        {
+          "changes": [
+            "+\"\"\"Top-level orchestration for the Git explainer agent.\"\"\"",
+            "+",
+            "+from __future__ import annotations",
+            "+",
+            "+import json",
+            "+from dataclasses import dataclass",
+            "+from typing import Any, TypedDict",
+            "+",
+            "+from git_explainer.guardrails import (",
+            "+    ExplainerQuery,",
+            "+    should_fetch_file_context,",
+            "+    validate_query,",
+            "+)",
+            "+from git_explainer.llm import LLMUnavailableError, chat, is_available",
+            "+from git_explainer.memory import ExplainerMemory",
+            "+from git_explainer.prompts import SYSTEM_PROMPT, build_synthesis_prompt",
+            "+from git_explainer.tools.file_context_reader import read_file_at_revision",
+            "+from git_explainer.tools.git_blame_trace import trace_line_history",
+            "+from git_explainer.tools.github_issue_lookup import (",
+            "+    extract_issue_refs,",
+            "+    fetch_issue,",
+            "+    fetch_issue_comments,",
+            "+)",
+            "+from git_explainer.tools.github_pr_lookup import (",
+            "+    fetch_pr,",
+            "+    fetch_pr_comments,",
+            "+    find_prs_for_commit,",
+            "+)",
+            "+",
+            "+",
+            "+class ExplanationSections(TypedDict):",
+            "+    what_changed: str",
+            "+    why: str",
+            "+    tradeoffs: str",
+            "+    limitations: str",
+            "+    summary: str",
+            "+",
+            "+",
+            "+class ExplanationResult(TypedDict):",
+            "+    query: dict[str, Any]",
+            "+    explanation: ExplanationSections",
+            "+    commits: list[dict[str, Any]]",
+            "+    pull_requests: list[dict[str, Any]]",
+            "+    issues: list[dict[str, Any]]",
+            "+    file_contexts: list[dict[str, Any]]",
+            "+    cache_stats: dict[str, int]",
+            "+    used_fallback: bool",
+            "+",
+            "+",
+            "+@dataclass(slots=True)",
+            "+class GitExplainerAgent:",
+            "+    \"\"\"Coordinate git tracing, GitHub enrichment, caching, and synthesis.\"\"\"",
+            "+",
+            "+    use_llm: bool = True",
+            "+",
+            "+    def explain(self, query: ExplainerQuery) -> ExplanationResult:",
+            "+        normalized = validate_query(query)",
+            "+        memory = ExplainerMemory(normalized.repo_path)",
+            "+",
+            "+        commits = trace_line_history(",
+            "+            normalized.repo_path,",
+            "+            normalized.file_path,",
+            "+            normalized.start_line,",
+            "+            normalized.end_line,",
+            "+            max_count=normalized.max_commits,",
+            "+        )",
+            "+",
+            "+        pull_requests, issues, contexts = self._collect_evidence(normalized, commits, memory)",
+            "+        evidence = {",
+            "+            \"commits\": commits,",
+            "+            \"pull_requests\": pull_requests,",
+            "+            \"issues\": issues,",
+            "+            \"file_contexts\": contexts,",
+            "+        }",
+            "+        explanation, used_fallback = self._synthesize(normalized, evidence)",
+            "+        memory.flush()",
+            "+",
+            "+        return ExplanationResult(",
+            "+            query=normalized.to_dict(),",
+            "+            explanation=explanation,"
+          ],
+          "header": "@@ -0,0 +1,323 @@"
         }
       ]
     },
@@ -770,6 +1018,304 @@
             "+"
           ],
           "header": "@@ -102,2 +116,13 @@ def validate_query(query: ExplainerQuery) -> ExplainerQuery:"
+        }
+      ]
+    },
+    "b05641e9b7826896cbcb06e9de33c21498fef113:git_explainer/orchestrator.py": {
+      "commit_sha": "b05641e",
+      "hunks": [
+        {
+          "changes": [
+            "+from git_explainer.tools.question_resolver import resolve_question_to_code"
+          ],
+          "header": "@@ -31,2 +31,3 @@ from git_explainer.tools.github_pr_lookup import ("
+        },
+        {
+          "changes": [
+            "+    resolved_target: dict[str, Any] | None"
+          ],
+          "header": "@@ -43,2 +44,3 @@ class ExplanationResult(TypedDict):"
+        },
+        {
+          "changes": [
+            "+        resolved_target: dict[str, Any] | None = None",
+            "+",
+            "+        if normalized.question and normalized.start_line is None and normalized.end_line is None:",
+            "+            original_question = normalized.question",
+            "+            resolution = resolve_question_to_code(",
+            "+                normalized.repo_path,",
+            "+                normalized.question,",
+            "+                file_path_hint=normalized.file_path,",
+            "+            )",
+            "+            resolved_target = resolution.to_dict()",
+            "+            normalized = validate_query(",
+            "+                ExplainerQuery(",
+            "+                    repo_path=normalized.repo_path,",
+            "+                    file_path=resolution.file_path,",
+            "+                    start_line=resolution.start_line,",
+            "+                    end_line=resolution.end_line,",
+            "+                    question=None,",
+            "+                    owner=normalized.owner,",
+            "+                    repo_name=normalized.repo_name,",
+            "+                    max_commits=normalized.max_commits,",
+            "+                    context_radius=normalized.context_radius,",
+            "+                    enforce_public_repo=normalized.enforce_public_repo,",
+            "+                )",
+            "+            )",
+            "+            normalized.question = original_question",
+            "+"
+          ],
+          "header": "@@ -61,2 +63,28 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+            resolved_target=resolved_target,"
+          ],
+          "header": "@@ -94,2 +122,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+        selection = _describe_selection(query)"
+          ],
+          "header": "@@ -269,2 +298,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                f\"The selected lines in {query.file_path}:{query.start_line}-{query.end_line} \"",
+            "+                f\"{selection} \""
+          ],
+          "header": "@@ -272,3 +302,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-                f\"No line-history commits were found for {query.file_path}:{query.start_line}-{query.end_line}. \"",
+            "+                f\"No line-history commits were found for {selection}. \""
+          ],
+          "header": "@@ -292,3 +322,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-    file_path: str,",
+            "-    start_line: int,",
+            "-    end_line: int,",
+            "+    file_path: str | None = None,",
+            "+    start_line: int | None = None,",
+            "+    end_line: int | None = None,",
+            "+    question: str | None = None,"
+          ],
+          "header": "@@ -391,6 +421,7 @@ def explain_code_history("
+        },
+        {
+          "changes": [
+            "+        question=question,"
+          ],
+          "header": "@@ -409,2 +440,3 @@ def explain_code_history("
+        },
+        {
+          "changes": [
+            "+",
+            "+",
+            "+def _describe_selection(query: ExplainerQuery) -> str:",
+            "+    target = f\"{query.file_path}:{query.start_line}-{query.end_line}\"",
+            "+    if query.question:",
+            "+        return f'The code matched for \"{query.question}\" in {target}'",
+            "+    return f\"The selected lines in {target}\""
+          ],
+          "header": "@@ -416 +448,8 @@ def explain_code_history("
+        }
+      ]
+    },
+    "df17b4f23410af49d10a0f563671216d32b8d4c3:git_explainer/orchestrator.py": {
+      "commit_sha": "df17b4f",
+      "hunks": [
+        {
+          "changes": [
+            "+import re"
+          ],
+          "header": "@@ -5,2 +5,3 @@ from __future__ import annotations"
+        },
+        {
+          "changes": [
+            "+from git_explainer.tools.commit_search import search_commits",
+            "+from git_explainer.tools.git_diff_reader import get_diff"
+          ],
+          "header": "@@ -17,3 +18,5 @@ from git_explainer.prompts import SYSTEM_PROMPT, build_synthesis_prompt"
+        },
+        {
+          "changes": [
+            "+    diffs: list[dict[str, Any]]"
+          ],
+          "header": "@@ -45,2 +48,3 @@ class ExplanationResult(TypedDict):"
+        },
+        {
+          "changes": [
+            "-        pull_requests, issues, contexts = self._collect_evidence(normalized, commits, memory)",
+            "+        if not commits:",
+            "+            try:",
+            "+                commits = search_commits(",
+            "+                    normalized.repo_path,",
+            "+                    path=normalized.file_path,",
+            "+                    max_count=normalized.max_commits,",
+            "+                )",
+            "+            except ValueError:",
+            "+                commits = []",
+            "+",
+            "+        pull_requests, issues, contexts, diffs = self._collect_evidence(normalized, commits, memory)"
+          ],
+          "header": "@@ -67,3 +71,13 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+            \"diffs\": diffs,"
+          ],
+          "header": "@@ -73,2 +87,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+            diffs=diffs,"
+          ],
+          "header": "@@ -84,2 +99,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:",
+            "+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:"
+          ],
+          "header": "@@ -93,3 +109,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+        diffs: list[dict[str, Any]] = []"
+          ],
+          "header": "@@ -97,2 +113,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+            diff_key = f\"{lookup_sha}:{query.file_path}\"",
+            "+            diff_data = memory.get_diff(diff_key)",
+            "+            if diff_data is None:",
+            "+                try:",
+            "+                    diff_summary = get_diff(",
+            "+                        query.repo_path,",
+            "+                        lookup_sha,",
+            "+                        file_path=query.file_path,",
+            "+                        context_lines=1,",
+            "+                    )",
+            "+                    diff_data = _compact_diff(diff_summary, commit[\"sha\"])",
+            "+                except (ValueError, OSError):",
+            "+                    diff_data = {\"commit_sha\": commit[\"sha\"], \"hunks\": []}",
+            "+                memory.set_diff(diff_key, diff_data)",
+            "+            if diff_data.get(\"hunks\"):",
+            "+                diffs.append(diff_data)",
+            "+"
+          ],
+          "header": "@@ -166,2 +183,19 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-        return pull_requests, issues, contexts",
+            "+        return pull_requests, issues, contexts, diffs",
+            "+",
+            "+    _REQUIRED_KEYS = {\"what_changed\", \"why\", \"tradeoffs\", \"limitations\", \"summary\"}"
+          ],
+          "header": "@@ -186,3 +220,5 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "-            try:",
+            "-                response = chat(",
+            "-                    build_synthesis_prompt(query.to_dict(), evidence),",
+            "-                    system_prompt=SYSTEM_PROMPT,",
+            "-                    temperature=0.1,",
+            "-                )",
+            "-                parsed = json.loads(response)",
+            "-                return self._normalize_sections(parsed), False",
+            "-            except (LLMUnavailableError, json.JSONDecodeError, KeyError, TypeError, ValueError):",
+            "-                pass",
+            "+            prompt = build_synthesis_prompt(query.to_dict(), evidence)",
+            "+            for attempt in range(2):",
+            "+                try:",
+            "+                    if attempt == 1:",
+            "+                        prompt = (",
+            "+                            \"Your previous response was not valid JSON. \"",
+            "+                            \"Reply ONLY with a JSON object (no markdown fences) \"",
+            "+                            \"containing keys: what_changed, why, tradeoffs, \"",
+            "+                            \"limitations, summary.\\n\\n\" + prompt",
+            "+                        )",
+            "+                    response = chat(",
+            "+                        prompt,",
+            "+                        system_prompt=SYSTEM_PROMPT,",
+            "+                        temperature=0.1,",
+            "+                    )",
+            "+                    parsed = json.loads(_extract_json(response))",
+            "+                    if not self._REQUIRED_KEYS.issubset(parsed.keys()):",
+            "+                        continue",
+            "+                    return self._normalize_sections(parsed), False",
+            "+                except (LLMUnavailableError, json.JSONDecodeError, KeyError, TypeError, ValueError):",
+            "+                    if attempt == 1:",
+            "+                        break"
+          ],
+          "header": "@@ -194,12 +230,24 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+        diffs = evidence.get(\"diffs\", [])"
+          ],
+          "header": "@@ -216,2 +264,3 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+            if diffs:",
+            "+                diff_total_adds = sum(",
+            "+                    len([l for l in h[\"changes\"] if l.startswith(\"+\")])",
+            "+                    for d in diffs for h in d.get(\"hunks\", [])",
+            "+                )",
+            "+                diff_total_dels = sum(",
+            "+                    len([l for l in h[\"changes\"] if l.startswith(\"-\")])",
+            "+                    for d in diffs for h in d.get(\"hunks\", [])",
+            "+                )",
+            "+                what_changed += (",
+            "+                    f\" The diffs show {diff_total_adds} addition(s) and \"",
+            "+                    f\"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s).\"",
+            "+                )"
+          ],
+          "header": "@@ -228,2 +277,15 @@ class GitExplainerAgent:"
+        },
+        {
+          "changes": [
+            "+_JSON_FENCE_RE = re.compile(r\"```(?:json)?\\s*\\n(.*?)\\n```\", re.DOTALL)",
+            "+",
+            "+",
+            "+def _extract_json(text: str) -> str:",
+            "+    \"\"\"Strip markdown code fences if the LLM wrapped its JSON response.\"\"\"",
+            "+    m = _JSON_FENCE_RE.search(text)",
+            "+    return m.group(1).strip() if m else text.strip()",
+            "+",
+            "+",
+            "+_MAX_DIFF_LINES = 80",
+            "+",
+            "+",
+            "+def _compact_diff(diff_summary: dict[str, Any], short_sha: str) -> dict[str, Any]:",
+            "+    \"\"\"Flatten a DiffSummary into a compact dict for evidence and caching.\"\"\"",
+            "+    hunks: list[dict[str, Any]] = []",
+            "+    for file_diff in diff_summary.get(\"files\", []):",
+            "+        for hunk in file_diff.get(\"hunks\", []):",
+            "+            lines = []",
+            "+            for hl in hunk.get(\"lines\", []):",
+            "+                if hl[\"type\"] == \"add\":",
+            "+                    lines.append(f\"+{hl['content']}\")",
+            "+                elif hl[\"type\"] == \"delete\":",
+            "+                    lines.append(f\"-{hl['content']}\")",
+            "+            if lines:",
+            "+                hunks.append({",
+            "+                    \"header\": hunk[\"header\"],",
+            "+                    \"changes\": lines[:_MAX_DIFF_LINES],",
+            "+                })",
+            "+    return {\"commit_sha\": short_sha, \"hunks\": hunks}",
+            "+",
+            "+"
+          ],
+          "header": "@@ -296,2 +358,33 @@ class GitExplainerAgent:"
         }
       ]
     },

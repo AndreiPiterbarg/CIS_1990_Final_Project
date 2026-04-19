@@ -361,5 +361,25 @@
       "error_contains": "at least one specific search term"
     },
     "tags": ["adversarial", "no-match", "question-mode"]
+  },
+  {
+    "id": "requests-exceptions-imports",
+    "description": "Requests exceptions module top-level imports — stable external-repo span added to bring the benchmark to 20 cases",
+    "repo_url": "https://github.com/psf/requests",
+    "owner": "psf",
+    "repo_name": "requests",
+    "file_path": "src/requests/exceptions.py",
+    "start_line": 1,
+    "end_line": 12,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "pr_numbers": [],
+      "issue_numbers": [],
+      "explanation_contains": ["exceptions.py"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "multi-commit"]
   }
 ]

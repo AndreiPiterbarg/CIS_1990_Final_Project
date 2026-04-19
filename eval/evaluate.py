@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -66,6 +67,13 @@ class CaseScore:
     checks: dict[str, bool]
     elapsed_seconds: float
     error: str | None = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+
+
+_CITATION_TOKEN_RE = re.compile(
+    r"\[(?P<kind>commit|pr|issue):(?P<value>(?:[0-9a-f]{7,40}|none)|#\d+)\]"
+)
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
 def load_benchmark(path: Path) -> list[BenchmarkCase]:
@@ -74,7 +82,8 @@ def load_benchmark(path: Path) -> list[BenchmarkCase]:
         print(f"Benchmark file not found: {path}")
         sys.exit(1)
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    data = raw.get("cases", []) if isinstance(raw, dict) else raw
     if not data:
         print(f"Benchmark file is empty: {path}")
         sys.exit(1)
@@ -131,6 +140,7 @@ def score_error_case(case: BenchmarkCase, error: str | None, elapsed: float) -> 
             checks=checks,
             elapsed_seconds=round(elapsed, 3),
             error=None,
+            metrics={},
         )
 
     checks["expects_error"] = True
@@ -145,6 +155,7 @@ def score_error_case(case: BenchmarkCase, error: str | None, elapsed: float) -> 
         checks=checks,
         elapsed_seconds=round(elapsed, 3),
         error=None,  # Expected error — not a harness failure
+        metrics={},
     )
 
 
@@ -208,13 +219,205 @@ def score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -
             for phrase in expected["resolved_preview_contains"]
         )
 
+    retrieval_metrics = _compute_retrieval_metrics(case, result)
+    citation_metrics = _compute_citation_metrics(result)
+    faithfulness_metrics = _compute_faithfulness_metrics(
+        case,
+        result,
+        retrieval_metrics,
+        citation_metrics,
+    )
+
+    if "retrieval_accuracy_min" in expected:
+        checks["retrieval_accuracy_min"] = (
+            retrieval_metrics["retrieval_accuracy"] is not None
+            and retrieval_metrics["retrieval_accuracy"] >= expected["retrieval_accuracy_min"]
+        )
+
+    if "citation_coverage_min" in expected:
+        checks["citation_coverage_min"] = (
+            citation_metrics["citation_coverage"] is not None
+            and citation_metrics["citation_coverage"] >= expected["citation_coverage_min"]
+        )
+
+    if "citation_validity_min" in expected:
+        checks["citation_validity_min"] = (
+            citation_metrics["citation_validity"] is not None
+            and citation_metrics["citation_validity"] >= expected["citation_validity_min"]
+        )
+
+    if "faithfulness_rubric_min" in expected:
+        checks["faithfulness_rubric_min"] = (
+            faithfulness_metrics["overall"] >= expected["faithfulness_rubric_min"]
+        )
+
     passed = all(checks.values()) if checks else True
     return CaseScore(
         case_id=case.id,
         passed=passed,
         checks=checks,
         elapsed_seconds=round(elapsed, 3),
+        metrics={
+            **retrieval_metrics,
+            **citation_metrics,
+            "faithfulness_rubric": faithfulness_metrics,
+        },
     )
+
+
+def _compute_retrieval_metrics(
+    case: BenchmarkCase,
+    result: ExplanationResult,
+) -> dict[str, Any]:
+    """Compute benchmark retrieval accuracy against gold targets in the case."""
+    expected = case.expected
+    matched = 0
+    targets = 0
+    breakdown: dict[str, dict[str, int]] = {}
+
+    commit_targets = expected.get("commit_message_contains", [])
+    if commit_targets:
+        messages = [commit["message"].lower() for commit in result["commits"]]
+        hit_count = sum(
+            1
+            for needle in commit_targets
+            if any(needle.lower() in message for message in messages)
+        )
+        breakdown["commit_messages"] = {"matched": hit_count, "targets": len(commit_targets)}
+        matched += hit_count
+        targets += len(commit_targets)
+
+    pr_targets = expected.get("pr_numbers", [])
+    if pr_targets:
+        found_prs = {pr["number"] for pr in result["pull_requests"]}
+        hit_count = sum(1 for number in pr_targets if number in found_prs)
+        breakdown["pull_requests"] = {"matched": hit_count, "targets": len(pr_targets)}
+        matched += hit_count
+        targets += len(pr_targets)
+
+    issue_targets = expected.get("issue_numbers", [])
+    if issue_targets:
+        found_issues = {issue["number"] for issue in result["issues"]}
+        hit_count = sum(1 for number in issue_targets if number in found_issues)
+        breakdown["issues"] = {"matched": hit_count, "targets": len(issue_targets)}
+        matched += hit_count
+        targets += len(issue_targets)
+
+    resolved = result.get("resolved_target") or {}
+    if "resolved_file_path" in expected:
+        hit_count = int(resolved.get("file_path") == expected["resolved_file_path"])
+        breakdown["resolved_file_path"] = {"matched": hit_count, "targets": 1}
+        matched += hit_count
+        targets += 1
+
+    matched_terms = expected.get("resolved_matched_terms", [])
+    if matched_terms:
+        found_terms = set(resolved.get("matched_terms", []))
+        hit_count = sum(1 for term in matched_terms if term in found_terms)
+        breakdown["resolved_matched_terms"] = {"matched": hit_count, "targets": len(matched_terms)}
+        matched += hit_count
+        targets += len(matched_terms)
+
+    accuracy = _safe_ratio(matched, targets)
+    return {
+        "retrieval_matched_count": matched,
+        "retrieval_target_count": targets,
+        "retrieval_accuracy": accuracy,
+        "retrieval_breakdown": breakdown,
+    }
+
+
+def _compute_citation_metrics(result: ExplanationResult) -> dict[str, Any]:
+    """Measure sentence-level citation coverage and citation validity."""
+    sections = result["explanation"]
+    citable_sentences = 0
+    cited_sentences = 0
+    total_citations = 0
+    valid_citations = 0
+
+    for text in sections.values():
+        for sentence in _iter_citable_sentences(str(text)):
+            citable_sentences += 1
+            citations = list(_CITATION_TOKEN_RE.finditer(sentence))
+            if citations:
+                cited_sentences += 1
+            total_citations += len(citations)
+            valid_citations += sum(
+                1
+                for match in citations
+                if _citation_is_valid(result, match.group("kind"), match.group("value"))
+            )
+
+    return {
+        "citable_sentence_count": citable_sentences,
+        "cited_sentence_count": cited_sentences,
+        "citation_coverage": _safe_ratio(cited_sentences, citable_sentences),
+        "citation_count": total_citations,
+        "valid_citation_count": valid_citations,
+        "citation_validity": _safe_ratio(valid_citations, total_citations),
+    }
+
+
+def _compute_faithfulness_metrics(
+    case: BenchmarkCase,
+    result: ExplanationResult,
+    retrieval_metrics: dict[str, Any],
+    citation_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    """Estimate rubric-style faithfulness from retrieval, citations, and answer completeness."""
+    sections = result["explanation"]
+    all_text = " ".join(str(sections[key]) for key in sections).lower()
+
+    non_empty_sections = sum(1 for text in sections.values() if str(text).strip())
+    completeness_ratio = non_empty_sections / len(sections) if sections else 0.0
+
+    expected_phrases = case.expected.get("explanation_contains", [])
+    if expected_phrases:
+        phrase_ratio = sum(
+            1 for phrase in expected_phrases if phrase.lower() in all_text
+        ) / len(expected_phrases)
+        answer_ratio = (completeness_ratio + phrase_ratio) / 2
+    else:
+        answer_ratio = completeness_ratio
+
+    retrieval_ratio = retrieval_metrics["retrieval_accuracy"]
+    if retrieval_ratio is None:
+        expected_min_commits = case.expected.get("min_commits")
+        if expected_min_commits:
+            retrieval_ratio = min(len(result["commits"]) / expected_min_commits, 1.0)
+        else:
+            retrieval_ratio = 1.0 if result["commits"] or result["resolved_target"] else 0.0
+
+    citation_ratio = citation_metrics["citation_coverage"] or 0.0
+    if citation_metrics["citation_validity"] is not None:
+        citation_ratio = (citation_ratio + citation_metrics["citation_validity"]) / 2
+
+    limitations_text = str(sections.get("limitations", ""))
+    limitation_sentences = list(_iter_citable_sentences(limitations_text))
+    if limitation_sentences:
+        limitation_cited = sum(
+            1 for sentence in limitation_sentences if _CITATION_TOKEN_RE.search(sentence)
+        )
+        limitations_ratio = limitation_cited / len(limitation_sentences)
+    else:
+        limitations_ratio = 0.0
+
+    component_ratios = {
+        "answer_completeness": answer_ratio,
+        "retrieval_support": retrieval_ratio,
+        "citation_grounding": citation_ratio,
+        "scope_honesty": limitations_ratio,
+    }
+    overall_ratio = sum(component_ratios.values()) / len(component_ratios)
+
+    return {
+        "mode": "proxy",
+        "overall": _ratio_to_rubric(overall_ratio),
+        "components": {
+            name: _ratio_to_rubric(ratio)
+            for name, ratio in component_ratios.items()
+        },
+    }
 
 
 def run_case(
@@ -231,6 +434,7 @@ def run_case(
             checks={},
             elapsed_seconds=0.0,
             error="Repository clone failed",
+            metrics={},
         )
 
     expects_error = case.expected.get("expects_error", False)
@@ -263,44 +467,231 @@ def run_case(
             checks={},
             elapsed_seconds=round(elapsed, 3),
             error=error_msg,
+            metrics={},
         )
 
 
-def print_report(scores: list[CaseScore], total_elapsed: float) -> None:
-    """Print a human-readable summary report to stdout."""
-    print()
-    print("=== Git Explainer Evaluation Report ===")
-    print(f"Ran {len(scores)} cases in {total_elapsed:.1f}s")
-    print()
+def _safe_ratio(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 3)
 
+
+def _ratio_to_rubric(ratio: float) -> float:
+    bounded = max(0.0, min(1.0, ratio))
+    return round(1.0 + 4.0 * bounded, 3)
+
+
+def _iter_citable_sentences(text: str) -> list[str]:
+    return [
+        sentence.strip()
+        for sentence in _SENTENCE_RE.split(text.strip())
+        if sentence.strip() and _sentence_needs_citation(sentence)
+    ]
+
+
+def _sentence_needs_citation(sentence: str) -> bool:
+    plain = _CITATION_TOKEN_RE.sub("", sentence)
+    plain = re.sub(r"[\s\W_]+", "", plain)
+    return bool(plain)
+
+
+def _citation_is_valid(result: ExplanationResult, kind: str, value: str) -> bool:
+    if kind == "commit":
+        if value == "none":
+            return not result["commits"]
+        for commit in result["commits"]:
+            short_sha = str(commit.get("sha", ""))
+            full_sha = str(commit.get("full_sha", ""))
+            if value == short_sha or (full_sha and full_sha.startswith(value)):
+                return True
+        return False
+
+    number = int(value.lstrip("#"))
+    if kind == "pr":
+        return any(pr["number"] == number for pr in result["pull_requests"])
+    if kind == "issue":
+        return any(issue["number"] == number for issue in result["issues"])
+    return False
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = (len(ordered) - 1) * percentile
+    lower = int(index)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = index - lower
+    value = ordered[lower] * (1 - weight) + ordered[upper] * weight
+    return round(value, 3)
+
+
+def summarize_scores(
+    cases: list[BenchmarkCase],
+    scores: list[CaseScore],
+    total_elapsed: float,
+) -> dict[str, Any]:
+    """Aggregate benchmark-wide metrics from per-case scores."""
     passed_count = 0
     failed_count = 0
     error_count = 0
 
+    retrieval_matched = 0
+    retrieval_targets = 0
+    cited_sentences = 0
+    citable_sentences = 0
+    valid_citations = 0
+    total_citations = 0
+    faithfulness_scores: list[float] = []
+    latencies = [score.elapsed_seconds for score in scores]
+
+    for score in scores:
+        if score.error:
+            error_count += 1
+            continue
+        if score.passed:
+            passed_count += 1
+        else:
+            failed_count += 1
+
+        retrieval_matched += int(score.metrics.get("retrieval_matched_count", 0))
+        retrieval_targets += int(score.metrics.get("retrieval_target_count", 0))
+        cited_sentences += int(score.metrics.get("cited_sentence_count", 0))
+        citable_sentences += int(score.metrics.get("citable_sentence_count", 0))
+        valid_citations += int(score.metrics.get("valid_citation_count", 0))
+        total_citations += int(score.metrics.get("citation_count", 0))
+
+        faithfulness = score.metrics.get("faithfulness_rubric", {}).get("overall")
+        if faithfulness is not None:
+            faithfulness_scores.append(float(faithfulness))
+
+    total = len(scores)
+    pass_rate = _safe_ratio(passed_count, total)
+    average_latency = round(sum(latencies) / len(latencies), 3) if latencies else None
+    average_faithfulness = (
+        round(sum(faithfulness_scores) / len(faithfulness_scores), 3)
+        if faithfulness_scores
+        else None
+    )
+
+    return {
+        "benchmark": {
+            "case_count": len(cases),
+            "repo_count": len({case.repo_url for case in cases}),
+        },
+        "counts": {
+            "passed": passed_count,
+            "failed": failed_count,
+            "errors": error_count,
+            "total": total,
+        },
+        "pass_rate": pass_rate,
+        "retrieval": {
+            "matched_count": retrieval_matched,
+            "target_count": retrieval_targets,
+            "accuracy": _safe_ratio(retrieval_matched, retrieval_targets),
+        },
+        "citation": {
+            "cited_sentence_count": cited_sentences,
+            "citable_sentence_count": citable_sentences,
+            "coverage": _safe_ratio(cited_sentences, citable_sentences),
+            "valid_citation_count": valid_citations,
+            "citation_count": total_citations,
+            "validity": _safe_ratio(valid_citations, total_citations),
+        },
+        "faithfulness_rubric": {
+            "mode": "proxy",
+            "average": average_faithfulness,
+            "case_count": len(faithfulness_scores),
+        },
+        "latency": {
+            "total_seconds": round(total_elapsed, 3),
+            "average_seconds": average_latency,
+            "p50_seconds": _percentile(latencies, 0.50),
+            "p95_seconds": _percentile(latencies, 0.95),
+        },
+    }
+
+
+def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
+    """Print a human-readable summary report to stdout."""
+    print()
+    print("=== Git Explainer Evaluation Report ===")
+    benchmark = summary["benchmark"]
+    counts = summary["counts"]
+    latency = summary["latency"]
+    retrieval = summary["retrieval"]
+    citation = summary["citation"]
+    faithfulness = summary["faithfulness_rubric"]
+
+    print(
+        f"Ran {benchmark['case_count']} cases across {benchmark['repo_count']} repos "
+        f"in {latency['total_seconds']:.1f}s"
+    )
+    print()
+
     for s in scores:
         if s.error:
-            error_count += 1
             print(f"ERROR   {s.case_id}  ({s.elapsed_seconds:.1f}s)  {s.error}")
         elif s.passed:
-            passed_count += 1
             num_checks = len(s.checks)
             print(f"PASSED  {s.case_id}  ({s.elapsed_seconds:.1f}s)  [all {num_checks} checks passed]")
         else:
-            failed_count += 1
             failed_checks = [name for name, ok in s.checks.items() if not ok]
             print(f"FAILED  {s.case_id}  ({s.elapsed_seconds:.1f}s)  [{', '.join(failed_checks)}]")
 
     print()
-    total = len(scores)
-    rate = (passed_count / total * 100) if total else 0.0
-    print(f"Summary: {passed_count} passed, {failed_count} failed, {error_count} errors out of {total} total")
-    print(f"Pass rate: {rate:.1f}%")
+    print(
+        "Summary: "
+        f"{counts['passed']} passed, {counts['failed']} failed, "
+        f"{counts['errors']} errors out of {counts['total']} total"
+    )
+    print(f"Pass rate: {(summary['pass_rate'] or 0.0) * 100:.1f}%")
+    if retrieval["accuracy"] is None:
+        print("Retrieval accuracy: n/a (no gold retrieval targets were specified)")
+    else:
+        print(
+            f"Retrieval accuracy: {retrieval['accuracy'] * 100:.1f}% "
+            f"({retrieval['matched_count']}/{retrieval['target_count']} expected targets)"
+        )
+    if citation["coverage"] is None:
+        print("Citation coverage: n/a (no citable explanation sentences)")
+    else:
+        print(
+            f"Citation coverage: {citation['coverage'] * 100:.1f}% "
+            f"({citation['cited_sentence_count']}/{citation['citable_sentence_count']} sentences)"
+        )
+    if citation["validity"] is None:
+        print("Citation validity: n/a (no citations present)")
+    else:
+        print(
+            f"Citation validity: {citation['validity'] * 100:.1f}% "
+            f"({citation['valid_citation_count']}/{citation['citation_count']} citations)"
+        )
+    if faithfulness["average"] is not None:
+        print(
+            f"Faithfulness rubric ({faithfulness['mode']}): "
+            f"{faithfulness['average']:.2f}/5.00"
+        )
+    if latency["average_seconds"] is not None:
+        print(
+            f"Latency: avg {latency['average_seconds']:.2f}s | "
+            f"p50 {latency['p50_seconds']:.2f}s | "
+            f"p95 {latency['p95_seconds']:.2f}s"
+        )
 
 
-def save_results(scores: list[CaseScore], path: Path) -> None:
+def save_results(scores: list[CaseScore], summary: dict[str, Any], path: Path) -> None:
     """Write full scoring results to a JSON file."""
     path.write_text(
-        json.dumps([asdict(s) for s in scores], indent=2) + "\n",
+        json.dumps(
+            {
+                "summary": summary,
+                "cases": [asdict(score) for score in scores],
+            },
+            indent=2,
+        ) + "\n",
         encoding="utf-8",
     )
 
@@ -384,8 +775,9 @@ def main(argv: list[str] | None = None) -> None:
 
     total_elapsed = time.monotonic() - total_start
 
-    print_report(scores, total_elapsed)
-    save_results(scores, args.results_file)
+    summary = summarize_scores(cases, scores, total_elapsed)
+    print_report(scores, summary)
+    save_results(scores, summary, args.results_file)
     print(f"\nResults written to {args.results_file}")
 
 

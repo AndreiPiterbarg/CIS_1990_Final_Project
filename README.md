@@ -171,4 +171,24 @@ python eval/evaluate.py \
     --results-file eval/results.json
 ```
 
-The harness prints a pass/fail report to stdout and writes full scoring details to `eval/results.json`.
+The harness prints a pass/fail report plus aggregate benchmark metrics, including retrieval accuracy, citation coverage, citation validity, a rubric-style faithfulness score, and latency percentiles. It writes both the aggregate summary and full per-case scoring details to `eval/results.json`.
+
+## Notebook Workbench
+
+For an interactive notebook under `eval/`, install the optional notebook dependencies and register the project-local kernel:
+
+```bash
+.venv/bin/python eval/setup_notebook.py
+```
+
+Then open:
+
+```bash
+.venv/bin/jupyter notebook eval/git_explainer_eval_workbench.ipynb
+```
+
+The notebook includes:
+
+- a single-query agent sandbox for trying out `explain_code_history`
+- a configurable benchmark runner with an offline-friendly smoke setup
+- plots for pass/fail counts, retrieval accuracy, citation coverage, citation validity, faithfulness, and latency

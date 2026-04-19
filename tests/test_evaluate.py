@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from eval.evaluate import BenchmarkCase, CaseScore, filter_cases, load_benchmark, score_case
+from eval.evaluate import (
+    BenchmarkCase,
+    CaseScore,
+    filter_cases,
+    load_benchmark,
+    save_results,
+    score_case,
+    summarize_scores,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +125,23 @@ class TestLoadBenchmark:
         assert result[0].file_path is None
         assert result[0].start_line is None
         assert result[0].end_line is None
+
+    def test_parses_suite_object_with_cases(self, tmp_path):
+        bench_file = tmp_path / "benchmark.json"
+        bench_file.write_text(
+            json.dumps(
+                {
+                    "name": "suite",
+                    "cases": [{**MINIMAL_CASE_DICT, "id": "case-embedded"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = load_benchmark(bench_file)
+
+        assert len(result) == 1
+        assert result[0].id == "case-embedded"
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +318,72 @@ class TestScoreCase:
         assert score.checks["resolved_matched_terms"] is True
         assert score.checks["resolved_preview_contains"] is True
 
+    def test_metrics_include_retrieval_citation_and_faithfulness(self):
+        case = _make_case(
+            expected={
+                "commit_message_contains": ["fix"],
+                "pr_numbers": [42],
+                "issue_numbers": [7],
+            }
+        )
+        result = _make_result(
+            commits=[
+                {
+                    "sha": "abc1234",
+                    "full_sha": "abc1234" + ("0" * 33),
+                    "author": "Alice",
+                    "date": "2024-06-15",
+                    "message": "Fix bug in parser",
+                }
+            ],
+            pull_requests=[{"number": 42, "title": "Fix parser"}],
+            issues=[{"number": 7, "title": "Parser crash"}],
+            explanation={
+                "what_changed": "Changed src/app.py [commit:abc1234].",
+                "why": "Bug report [issue:#7].",
+                "tradeoffs": "Small behavior change [pr:#42].",
+                "limitations": "Only benchmarked on one path [commit:abc1234].",
+                "summary": "Parser behavior is now fixed [pr:#42].",
+            },
+        )
+
+        score = score_case(case, result, elapsed=0.4)
+
+        assert score.metrics["retrieval_target_count"] == 3
+        assert score.metrics["retrieval_matched_count"] == 3
+        assert score.metrics["retrieval_accuracy"] == 1.0
+        assert score.metrics["citation_coverage"] == 1.0
+        assert score.metrics["citation_validity"] == 1.0
+        assert score.metrics["faithfulness_rubric"]["overall"] == 5.0
+
+    def test_metrics_report_partial_citation_coverage(self):
+        case = _make_case(expected={})
+        result = _make_result(
+            commits=[
+                {
+                    "sha": "abc1234",
+                    "full_sha": "abc1234" + ("0" * 33),
+                    "author": "Alice",
+                    "date": "2024-06-15",
+                    "message": "Refactor parser",
+                }
+            ],
+            explanation={
+                "what_changed": "Changed src/app.py [commit:abc1234]. Another uncited sentence.",
+                "why": "Because we needed the cleanup [commit:abc1234].",
+                "tradeoffs": "Slightly more code [commit:abc1234].",
+                "limitations": "Only covers one parser path [commit:abc1234].",
+                "summary": "Parser code is cleaner [commit:abc1234].",
+            },
+        )
+
+        score = score_case(case, result, elapsed=0.6)
+
+        assert score.metrics["citable_sentence_count"] == 6
+        assert score.metrics["cited_sentence_count"] == 5
+        assert score.metrics["citation_coverage"] == pytest.approx(0.833, abs=0.001)
+        assert score.metrics["citation_validity"] == 1.0
+
 
 # ---------------------------------------------------------------------------
 # filter_cases
@@ -325,3 +414,74 @@ class TestFilterCases:
 
         assert len(filtered) == 2
         assert {c.id for c in filtered} == {"case-1", "case-3"}
+
+
+class TestSummaries:
+    def test_summarize_scores_aggregates_metrics(self):
+        cases = [_make_case(id="c1"), _make_case(id="c2")]
+        scores = [
+            CaseScore(
+                case_id="c1",
+                passed=True,
+                checks={"min_commits": True},
+                elapsed_seconds=1.0,
+                metrics={
+                    "retrieval_matched_count": 2,
+                    "retrieval_target_count": 2,
+                    "cited_sentence_count": 5,
+                    "citable_sentence_count": 5,
+                    "valid_citation_count": 5,
+                    "citation_count": 5,
+                    "faithfulness_rubric": {"overall": 5.0},
+                },
+            ),
+            CaseScore(
+                case_id="c2",
+                passed=False,
+                checks={"min_commits": False},
+                elapsed_seconds=3.0,
+                metrics={
+                    "retrieval_matched_count": 1,
+                    "retrieval_target_count": 2,
+                    "cited_sentence_count": 3,
+                    "citable_sentence_count": 5,
+                    "valid_citation_count": 3,
+                    "citation_count": 4,
+                    "faithfulness_rubric": {"overall": 3.0},
+                },
+            ),
+        ]
+
+        summary = summarize_scores(cases, scores, total_elapsed=4.0)
+
+        assert summary["benchmark"] == {"case_count": 2, "repo_count": 1}
+        assert summary["counts"] == {"passed": 1, "failed": 1, "errors": 0, "total": 2}
+        assert summary["pass_rate"] == 0.5
+        assert summary["retrieval"]["accuracy"] == 0.75
+        assert summary["citation"]["coverage"] == 0.8
+        assert summary["citation"]["validity"] == pytest.approx(0.889, abs=0.001)
+        assert summary["faithfulness_rubric"]["average"] == 4.0
+        assert summary["latency"]["average_seconds"] == 2.0
+        assert summary["latency"]["p50_seconds"] == 2.0
+        assert summary["latency"]["p95_seconds"] == pytest.approx(2.9, abs=0.001)
+
+    def test_save_results_writes_summary_and_cases(self, tmp_path):
+        results_file = tmp_path / "results.json"
+        summary = {"benchmark": {"case_count": 1, "repo_count": 1}}
+        scores = [
+            CaseScore(
+                case_id="case-1",
+                passed=True,
+                checks={"min_commits": True},
+                elapsed_seconds=0.2,
+                metrics={"retrieval_accuracy": 1.0},
+            )
+        ]
+
+        save_results(scores, summary, results_file)
+
+        payload = json.loads(results_file.read_text(encoding="utf-8"))
+
+        assert payload["summary"] == summary
+        assert payload["cases"][0]["case_id"] == "case-1"
+        assert payload["cases"][0]["metrics"]["retrieval_accuracy"] == 1.0
