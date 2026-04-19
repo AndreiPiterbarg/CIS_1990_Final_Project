@@ -53,6 +53,10 @@ class ExplanationResult(TypedDict):
     used_fallback: bool
 
 
+class CitationCoverageError(ValueError):
+    """Raised when a synthesized explanation contains uncited prose."""
+
+
 @dataclass(slots=True)
 class GitExplainerAgent:
     """Coordinate git tracing, GitHub enrichment, caching, and synthesis."""
@@ -262,10 +266,13 @@ class GitExplainerAgent:
                 try:
                     if attempt == 1:
                         prompt = (
-                            "Your previous response was not valid JSON. "
+                            "Your previous response failed validation. "
                             "Reply ONLY with a JSON object (no markdown fences) "
                             "containing keys: what_changed, why, tradeoffs, "
-                            "limitations, summary.\n\n" + prompt
+                            "limitations, summary. Every sentence in every "
+                            "section must include at least one bracketed "
+                            "citation like [commit:abc1234], [pr:#42], or "
+                            "[issue:#101].\n\n" + prompt
                         )
                     response = chat(
                         prompt,
@@ -275,8 +282,17 @@ class GitExplainerAgent:
                     parsed = json.loads(_extract_json(response))
                     if not self._REQUIRED_KEYS.issubset(parsed.keys()):
                         continue
-                    return self._normalize_sections(parsed), False
-                except (LLMUnavailableError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+                    normalized = self._normalize_sections(parsed)
+                    _ensure_citation_coverage(normalized)
+                    return normalized, False
+                except (
+                    CitationCoverageError,
+                    LLMUnavailableError,
+                    json.JSONDecodeError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                ):
                     if attempt == 1:
                         break
 
@@ -303,7 +319,7 @@ class GitExplainerAgent:
                 f"{selection} "
                 f"were most recently shaped by {len(commits)} traced commit(s): "
                 + "; ".join(f"{c['sha']} ({c['message']})" for c in commits[:3])
-                + f". {commit_citations}"
+                + f" {commit_citations}."
             )
             if diffs:
                 diff_total_adds = sum(
@@ -316,12 +332,12 @@ class GitExplainerAgent:
                 )
                 what_changed += (
                     f" The diffs show {diff_total_adds} addition(s) and "
-                    f"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s)."
+                    f"{diff_total_dels} deletion(s) across {len(diffs)} commit diff(s) "
+                    f"{commit_citations}."
                 )
         else:
             what_changed = (
-                f"No line-history commits were found for {selection}. "
-                "[commit:none]"
+                f"No line-history commits were found for {selection} [commit:none]."
             )
 
         if pull_requests or issues:
@@ -330,35 +346,39 @@ class GitExplainerAgent:
                 why_parts.append(
                     "Related pull requests suggest the intent was "
                     + "; ".join(f"#{pr['number']} ({pr['title']})" for pr in pull_requests[:2])
+                    + f" {pr_citations}."
                 )
             if issues:
                 why_parts.append(
                     "Linked issues add context from "
                     + "; ".join(f"#{issue['number']} ({issue['title']})" for issue in issues[:2])
+                    + f" {issue_citations}."
                 )
-            why = ". ".join(why_parts) + ". " + " ".join(x for x in [pr_citations, issue_citations] if x)
+            why = " ".join(why_parts)
         else:
             why = (
                 "No linked pull request or issue metadata was found, so the intent can only be inferred "
-                f"from commit messages and surrounding code. {commit_citations}"
+                f"from commit messages and surrounding code {commit_citations}."
             )
 
         if contexts:
             tradeoffs = (
                 f"Surrounding file context was fetched for {len(contexts)} commit(s), which suggests the change "
-                "needed additional local context beyond the commit message. Explicit trade-offs were not clearly "
-                f"documented in the fetched metadata. {commit_citations}"
+                f"needed additional local context beyond the commit message {commit_citations}. "
+                "Explicit trade-offs were not clearly documented in the fetched metadata "
+                f"{commit_citations}."
             )
         else:
             tradeoffs = (
                 "The retrieved PRs and issues did not spell out clear trade-offs, so no stronger claim is made "
-                f"beyond the available commit and PR evidence. {' '.join(x for x in [commit_citations, pr_citations] if x)}"
+                f"beyond the available commit and PR evidence "
+                f"{' '.join(x for x in [commit_citations, pr_citations] if x)}."
             )
 
         limitations = (
             "This explanation is limited to the traced commits, associated pull requests, linked issues, "
-            "and any fetched file context. If a change was discussed elsewhere, it will not appear here. "
-            f"{' '.join(x for x in [commit_citations, pr_citations, issue_citations] if x)}"
+            "and any fetched file context; if a change was discussed elsewhere, it will not appear here "
+            f"{' '.join(x for x in [commit_citations, pr_citations, issue_citations] if x)}."
         )
 
         summary = f"{what_changed} {why}"
@@ -387,12 +407,39 @@ class GitExplainerAgent:
 
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)\n```", re.DOTALL)
+_CITATION_RE = re.compile(r"\[(?:commit:(?:[0-9a-f]{7,40}|none)|pr:#\d+|issue:#\d+)\]")
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
 def _extract_json(text: str) -> str:
     """Strip markdown code fences if the LLM wrapped its JSON response."""
     m = _JSON_FENCE_RE.search(text)
     return m.group(1).strip() if m else text.strip()
+
+
+def _ensure_citation_coverage(sections: ExplanationSections) -> None:
+    """Reject synthesized prose when any sentence lacks a citation."""
+    for section_name, text in sections.items():
+        if not _CITATION_RE.search(text):
+            raise CitationCoverageError(
+                f"Section {section_name!r} is missing bracketed citations"
+            )
+
+        for sentence in _SENTENCE_RE.split(text.strip()):
+            if not sentence.strip():
+                continue
+            if not _sentence_needs_citation(sentence):
+                continue
+            if not _CITATION_RE.search(sentence):
+                raise CitationCoverageError(
+                    f"Section {section_name!r} contains uncited prose: {sentence!r}"
+                )
+
+
+def _sentence_needs_citation(sentence: str) -> bool:
+    plain = _CITATION_RE.sub("", sentence)
+    plain = re.sub(r"[\s\W_]+", "", plain)
+    return bool(plain)
 
 
 _MAX_DIFF_LINES = 80

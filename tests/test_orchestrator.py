@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -184,3 +185,60 @@ def test_agent_resolves_question_before_tracing_history(
         "preview": "import requests\n\ndef fetch_issue():\n    pass",
     }
     assert result["query"]["question"] == "Why is requests used for GitHub issue lookups?"
+
+
+@patch("git_explainer.orchestrator.chat")
+@patch("git_explainer.orchestrator.is_available")
+@patch("git_explainer.orchestrator.get_diff")
+@patch("git_explainer.orchestrator.read_file_at_revision")
+@patch("git_explainer.orchestrator.fetch_pr_comments")
+@patch("git_explainer.orchestrator.fetch_pr")
+@patch("git_explainer.orchestrator.find_prs_for_commit")
+@patch("git_explainer.orchestrator.trace_line_history")
+@patch("git_explainer.orchestrator.validate_query")
+def test_agent_rejects_uncited_llm_output_and_uses_fallback(
+    mock_validate,
+    mock_trace,
+    mock_find_prs,
+    mock_fetch_pr,
+    mock_fetch_pr_comments,
+    mock_read_file,
+    mock_get_diff,
+    mock_is_available,
+    mock_chat,
+    tmp_path,
+):
+    query = _make_query(tmp_path)
+    mock_validate.return_value = query
+    mock_trace.return_value = [
+        {"sha": "abc1234", "full_sha": "abc123456789", "author": "Alice", "date": "2024-06-01", "message": "Fix parser"},
+    ]
+    mock_find_prs.return_value = [42]
+    mock_fetch_pr.return_value = {"number": 42, "title": "Improve parser", "body": "", "state": "merged"}
+    mock_fetch_pr_comments.return_value = []
+    mock_read_file.return_value = "context"
+    mock_get_diff.return_value = {"files": []}
+    mock_is_available.return_value = True
+    mock_chat.side_effect = [
+        json.dumps({
+            "what_changed": "A parser helper changed.",
+            "why": "It improved the parser [pr:#42].",
+            "tradeoffs": "Trade-offs were minor [commit:abc1234].",
+            "limitations": "This only covers the available evidence [commit:abc1234].",
+            "summary": "The parser changed [commit:abc1234].",
+        }),
+        json.dumps({
+            "what_changed": "A parser helper changed.",
+            "why": "It improved the parser [pr:#42].",
+            "tradeoffs": "Trade-offs were minor [commit:abc1234].",
+            "limitations": "This only covers the available evidence [commit:abc1234].",
+            "summary": "The parser changed [commit:abc1234].",
+        }),
+    ]
+
+    result = GitExplainerAgent(use_llm=True).explain(query)
+
+    assert result["used_fallback"] is True
+    assert mock_chat.call_count == 2
+    assert "[commit:abc1234]" in result["explanation"]["what_changed"]
+    assert "[pr:#42]" in result["explanation"]["why"]

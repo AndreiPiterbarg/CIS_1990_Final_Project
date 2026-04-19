@@ -54,6 +54,30 @@ _HUNK_RE = re.compile(
     r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$"
 )
 _BINARY_RE = re.compile(r"^Binary files .* differ$")
+_SENSITIVE_KEY_RE = (
+    r"(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|private[_-]?key|password|passwd|secret|token)"
+)
+_QUOTED_SECRET_RE = re.compile(
+    rf"(?i)(?P<prefix>[\"']?{_SENSITIVE_KEY_RE}[\"']?\s*[:=]\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)"
+)
+_ENV_SECRET_RE = re.compile(
+    r"(?P<prefix>\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*=)(?P<value>[^\s#]+)"
+)
+_AUTH_HEADER_RE = re.compile(
+    r"(?i)(?P<prefix>authorization\s*[:=]\s*(?:bearer|token)?\s*)(?P<value>[^\s,]+)"
+)
+_URL_CREDENTIALS_RE = re.compile(
+    r"(?P<scheme>[a-z][a-z0-9+.-]*://)(?P<creds>[^/\s:@]+:[^/\s@]+)@",
+    re.IGNORECASE,
+)
+_TOKEN_LITERAL_PATTERNS = [
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9]{12,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +290,7 @@ def _parse_hunks(lines: list[str]) -> list[Hunk]:
         if line.startswith("+"):
             current_hunk["lines"].append(HunkLine(
                 type="add",
-                content=line[1:],
+                content=_redact_sensitive_diff_content(line[1:]),
                 old_line=None,
                 new_line=new_line,
             ))
@@ -274,7 +298,7 @@ def _parse_hunks(lines: list[str]) -> list[Hunk]:
         elif line.startswith("-"):
             current_hunk["lines"].append(HunkLine(
                 type="delete",
-                content=line[1:],
+                content=_redact_sensitive_diff_content(line[1:]),
                 old_line=old_line,
                 new_line=None,
             ))
@@ -282,7 +306,7 @@ def _parse_hunks(lines: list[str]) -> list[Hunk]:
         elif line.startswith(" "):
             current_hunk["lines"].append(HunkLine(
                 type="context",
-                content=line[1:],
+                content=_redact_sensitive_diff_content(line[1:]),
                 old_line=old_line,
                 new_line=new_line,
             ))
@@ -303,3 +327,21 @@ def _empty_file_diff() -> FileDiff:
         is_binary=False,
         hunks=[],
     )
+
+
+def _redact_sensitive_diff_content(content: str) -> str:
+    """Mask credential-like literals while preserving the code around them."""
+    redacted = content
+    redacted = _URL_CREDENTIALS_RE.sub(r"\g<scheme>[REDACTED]@", redacted)
+    redacted = _QUOTED_SECRET_RE.sub(_replace_quoted_secret, redacted)
+    redacted = _ENV_SECRET_RE.sub(r"\g<prefix>[REDACTED]", redacted)
+    redacted = _AUTH_HEADER_RE.sub(r"\g<prefix>[REDACTED]", redacted)
+    for pattern in _TOKEN_LITERAL_PATTERNS:
+        redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
+
+
+def _replace_quoted_secret(match: re.Match[str]) -> str:
+    prefix = match.group("prefix")
+    quote = match.group("quote")
+    return f"{prefix}{quote}[REDACTED]{quote}"

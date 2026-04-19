@@ -102,16 +102,18 @@ class TestGetBlame:
         mock_git.return_value = PORCELAIN_BLAME
         result = get_blame("/repo", "src/app.py")
 
-        mock_git.assert_called_once_with("/repo", ["blame", "--porcelain", "src/app.py"])
+        mock_git.assert_called_once_with("/repo", ["blame", "--porcelain", "-M", "src/app.py"])
         assert len(result) == 2
 
         assert result[0]["sha"] == "a1b2c3d"
+        assert result[0]["full_sha"] == "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
         assert result[0]["author"] == "Alice"
         assert result[0]["date"] == "2023-11-14"
         assert result[0]["line"] == 10
         assert result[0]["content"] == "def hello():"
 
         assert result[1]["sha"] == "b2c3d4e"
+        assert result[1]["full_sha"] == "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3"
         assert result[1]["author"] == "Bob"
         assert result[1]["date"] == "2023-11-16"
         assert result[1]["line"] == 11
@@ -123,7 +125,7 @@ class TestGetBlame:
         get_blame("/repo", "src/app.py", start_line=10, end_line=20)
 
         mock_git.assert_called_once_with(
-            "/repo", ["blame", "--porcelain", "-L10,20", "src/app.py"]
+            "/repo", ["blame", "--porcelain", "-M", "-L10,20", "src/app.py"]
         )
 
     @patch("git_explainer.tools.git_blame_trace.run_git")
@@ -132,7 +134,32 @@ class TestGetBlame:
         get_blame("/repo", "src/app.py", start_line=10)
 
         mock_git.assert_called_once_with(
-            "/repo", ["blame", "--porcelain", "-L10,10", "src/app.py"]
+            "/repo", ["blame", "--porcelain", "-M", "-L10,10", "src/app.py"]
+        )
+
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_blame_uses_ignore_revs_file_when_provided(self, mock_git):
+        mock_git.return_value = PORCELAIN_BLAME
+
+        get_blame(
+            "/repo",
+            "src/app.py",
+            start_line=10,
+            end_line=20,
+            ignore_revs_file="/repo/.git-blame-ignore-revs",
+        )
+
+        mock_git.assert_called_once_with(
+            "/repo",
+            [
+                "blame",
+                "--porcelain",
+                "-M",
+                "--ignore-revs-file",
+                "/repo/.git-blame-ignore-revs",
+                "-L10,20",
+                "src/app.py",
+            ],
         )
 
     @patch("git_explainer.tools.git_blame_trace.run_git")
@@ -241,6 +268,36 @@ class TestTraceLineHistory:
             },
         ]
 
+    @patch("git_explainer.tools.git_blame_trace.run_git")
+    def test_trace_line_history_supplements_ignore_revs_with_follow_history(self, mock_git, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git-blame-ignore-revs").write_text("abc1234567890abc\n", encoding="utf-8")
+        original_sha = "def5678" + ("0" * 33)
+        mock_git.side_effect = [
+            "abc1234567890abc|Alice|2024-06-15|Format file\n",
+            dedent(f"""\
+                {original_sha} 12 12 1
+                author Bob
+                author-time 1717200000
+                filename src/app.py
+                \treturn value
+            """),
+            dedent(f"""\
+                abc1234567890abc|Alice|2024-06-15|Format file
+                {original_sha}|Bob|2024-06-01|Original feature
+            """),
+        ]
+
+        result = trace_line_history(str(repo), "src/app.py", 12, 12, max_count=5)
+
+        assert [entry["sha"] for entry in result] == ["abc1234", "def5678"]
+        blame_call = mock_git.call_args_list[1][0][1]
+        assert "--ignore-revs-file" in blame_call
+        assert str(repo / ".git-blame-ignore-revs") in blame_call
+        follow_call = mock_git.call_args_list[2][0][1]
+        assert follow_call[:3] == ["log", "--follow", "-M"]
+
 
 # ---------------------------------------------------------------------------
 # git_diff_reader
@@ -311,6 +368,19 @@ BINARY_DIFF = dedent("""\
     diff --git a/image.png b/image.png
     index 1234567..abcdefg 100644
     Binary files a/image.png and b/image.png differ
+""")
+
+SECRET_DIFF = dedent("""\
+    diff --git a/.env b/.env
+    index 1234567..abcdefg 100644
+    --- a/.env
+    +++ b/.env
+    @@ -1,2 +1,4 @@
+    -GITHUB_TOKEN=ghp_oldsecret12345678901234567890
+    +GITHUB_TOKEN=ghp_newsecret12345678901234567890
+    +api_key = "sk-super-secret-token"
+    +headers = {"Authorization": "Bearer really-secret-value"}
+    +origin = "https://alice:supersecret@example.com/private"
 """)
 
 MULTI_FILE_DIFF = MODIFIED_DIFF + ADDED_FILE_DIFF + DELETED_FILE_DIFF
@@ -421,6 +491,20 @@ class TestGetDiff:
         for al in add_lines:
             assert al["old_line"] is None
             assert al["new_line"] is not None
+
+    @patch("git_explainer.tools.git_diff_reader.run_git")
+    def test_redacts_sensitive_literals_in_diff_lines(self, mock_git):
+        mock_git.return_value = SECRET_DIFF
+        result = get_diff("/repo", "abc123")
+
+        lines = result["files"][0]["hunks"][0]["lines"]
+        contents = [line["content"] for line in lines]
+        assert all("[REDACTED]" in content for content in contents)
+        joined = "\n".join(contents)
+        assert "ghp_newsecret12345678901234567890" not in joined
+        assert "sk-super-secret-token" not in joined
+        assert "really-secret-value" not in joined
+        assert "alice:supersecret@" not in joined
 
 
 class TestGetDiffStats:
