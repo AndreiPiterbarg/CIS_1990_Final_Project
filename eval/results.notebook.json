@@ -30,10 +30,10 @@
       "case_count": 3
     },
     "latency": {
-      "total_seconds": 0.371,
-      "average_seconds": 0.092,
-      "p50_seconds": 0.119,
-      "p95_seconds": 0.13
+      "total_seconds": 0.501,
+      "average_seconds": 0.125,
+      "p50_seconds": 0.15,
+      "p95_seconds": 0.192
     }
   },
   "cases": [
@@ -48,7 +48,7 @@
         "explanation_contains": true,
         "used_fallback": true
       },
-      "elapsed_seconds": 0.13,
+      "elapsed_seconds": 0.198,
       "error": null,
       "metrics": {
         "retrieval_matched_count": 2,
@@ -89,7 +89,7 @@
         "explanation_contains": true,
         "used_fallback": true
       },
-      "elapsed_seconds": 0.111,
+      "elapsed_seconds": 0.159,
       "error": null,
       "metrics": {
         "retrieval_matched_count": 1,
@@ -129,7 +129,7 @@
         "resolved_file_path": true,
         "resolved_preview_contains": true
       },
-      "elapsed_seconds": 0.127,
+      "elapsed_seconds": 0.142,
       "error": null,
       "metrics": {
         "retrieval_matched_count": 2,
