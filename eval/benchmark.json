@@ -160,12 +160,52 @@
     "expected": {
       "min_commits": 1,
       "commit_message_contains": ["Add git tools"],
-      "pr_numbers": [],
-      "issue_numbers": [],
+      "expects_no_pull_requests": true,
+      "expects_no_issues": true,
       "explanation_contains": ["file_context_reader.py", "No linked pull request"],
       "used_fallback": true
     },
     "tags": ["no-metadata", "fallback"]
+  },
+  {
+    "id": "abstention-direct-commit-no-pr",
+    "description": "Direct-to-master fallback span with traced commits but no associated PR or issue metadata",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": "git_explainer/orchestrator.py",
+    "start_line": 56,
+    "end_line": 58,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "expects_no_pull_requests": true,
+      "expects_no_issues": true,
+      "explanation_contains": ["No linked pull request", "[commit:"],
+      "used_fallback": true
+    },
+    "tags": ["abstention", "graceful-degradation", "fallback"]
+  },
+  {
+    "id": "abstention-no-owner-repo",
+    "description": "Owner/repo omitted on a local-project case — the harness should force a no-metadata fallback without fabricated links",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": null,
+    "repo_name": null,
+    "file_path": "git_explainer/orchestrator.py",
+    "start_line": 56,
+    "end_line": 58,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "expects_no_pull_requests": true,
+      "expects_no_issues": true,
+      "explanation_contains": ["No linked pull request", "[commit:"],
+      "used_fallback": true
+    },
+    "tags": ["abstention", "no-metadata", "fallback"]
   },
   {
     "id": "flask-init-imports",
@@ -201,7 +241,6 @@
     "use_llm": false,
     "expected": {
       "min_commits": 1,
-      "commit_message_contains": [],
       "pr_numbers": [],
       "issue_numbers": [],
       "explanation_contains": ["api.py"],
