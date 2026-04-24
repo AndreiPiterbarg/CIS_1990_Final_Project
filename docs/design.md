@@ -22,8 +22,9 @@ Input shapes, validated in
 2. `(repo_path, --question ...)` with an optional `file_path` hint —
    resolved to a concrete span before tracing.
 
-Out of scope: non-GitHub hosting, private repos when
-`--enforce-public-repo` is set, binary files, cross-repository traces.
+Out of scope: non-GitHub hosting, private repos (refused by default —
+`enforce_public_repo=True`, opt out via `--allow-private-repo`),
+binary files, cross-repository traces.
 
 ## 2. System flow
 
@@ -31,11 +32,12 @@ A single invocation of `python main.py ...` flows through CLI entry,
 `validate_query`, optional question-to-code resolution,
 `trace_line_history` (with a `search_commits` fallback when the line
 trace returns nothing), per-commit evidence collection with
-`ExplainerMemory` caching, synthesis (LLM with citation-coverage
-validation, otherwise a deterministic fallback), and JSON emission.
-Guardrail checks (double-octagon nodes) can terminate the run by
-raising `ValueError`. Cylinders represent reads or writes against
-`ExplainerMemory`.
+`ExplainerMemory` caching, a pre-synthesis evidence-condensation pass
+(so long PR/issue threads do not overflow the synthesis prompt),
+synthesis (LLM with citation-coverage validation, otherwise a
+deterministic fallback), and JSON emission. Guardrail checks
+(double-octagon nodes) can terminate the run by raising `ValueError`.
+Cylinders represent reads or writes against `ExplainerMemory`.
 
 ```mermaid
 flowchart TD
@@ -59,13 +61,14 @@ flowchart TD
     FileCtx["read_file_at_revision<br/>file_context_reader.py"]
     Diff["get_diff<br/>git_diff_reader.py<br/>with credential redaction"]
     MemWrite[("ExplainerMemory.set_*<br/>on every cache miss")]
+    Condense["condense_evidence<br/>evidence_condenser.py<br/>two-tier: LLM summary<br/>then heuristic truncation<br/>if payload &gt; EVIDENCE_CHAR_BUDGET"]
     Synth{"use_llm AND<br/>is_available()?"}
     LLMCall["chat<br/>llm.py<br/>uses SYSTEM_PROMPT +<br/>build_synthesis_prompt"]
     CitationCheck{{"_ensure_citation_coverage<br/>orchestrator.py:420"}}
     Retry{"attempts under 2?"}
     Fallback["_fallback_summary<br/>deterministic templating<br/>orchestrator.py:301"]
     Flush["memory.flush()<br/>orchestrator.py:123"]
-    Result([JSON ExplanationResult<br/>printed to stdout])
+    Result([JSON ExplanationResult<br/>printed to stdout<br/>originals preserved;<br/>only synthesis sees condensed])
 
     Start --> Mode
     Mode -->|no| LineEntry
@@ -95,7 +98,8 @@ flowchart TD
     FileCtx --> MemWrite
     MemWrite --> Diff
     Diff --> MemWrite
-    MemWrite --> Synth
+    MemWrite --> Condense
+    Condense --> Synth
     Synth -->|LLM on| LLMCall
     Synth -->|LLM off or unavailable| Fallback
     LLMCall --> CitationCheck
@@ -152,9 +156,13 @@ by shape).
   ([guardrails.py:117-125](../git_explainer/guardrails.py#L117-L125)).
 - **Repository containment**: [normalize_file_path](../git_explainer/guardrails.py#L128)
   rejects paths outside the repo root.
-- **Private-repo refusal (opt-in)**: when `enforce_public_repo=True`,
-  [ensure_public_github_repo](../git_explainer/guardrails.py#L161)
-  rejects 404 or `private: true`.
+- **Private-repo refusal (default on)**: `enforce_public_repo` now
+  defaults to `True`. The guardrail calls
+  [ensure_public_github_repo](../git_explainer/guardrails.py#L161),
+  which rejects 404 or `private: true`. Opt out at the CLI with
+  `--allow-private-repo` or programmatically by constructing
+  [ExplainerQuery](../git_explainer/guardrails.py#L24) with
+  `enforce_public_repo=False`.
 - **Parameter clamping**: `max_commits` ∈ `[1, 20]`, `context_radius`
   ∈ `[0, 200]`
   ([guardrails.py:102-103](../git_explainer/guardrails.py#L102-L103)).
@@ -162,7 +170,69 @@ by shape).
   rejects synthesized sentences without a bracketed citation and
   triggers the retry loop.
 
-## 5. Threat model
+## 5. Evidence pre-summarization (condensation)
+
+Long GitHub threads can easily overflow the synthesis model's context
+window. Between evidence collection and synthesis, the orchestrator
+invokes
+[condense_evidence](../git_explainer/evidence_condenser.py) on the
+collected payload (commits, pull requests, issues, file contexts,
+diffs).
+
+Trigger threshold. If the serialized evidence dict is at or under
+[config.EVIDENCE_CHAR_BUDGET](../git_explainer/config.py#L45) (default
+`30000` characters, overridable via the `EVIDENCE_CHAR_BUDGET` env
+var), condensation is a no-op and the report's `method_used` is
+`"none"`. Only when the payload exceeds the budget does the condenser
+run.
+
+Two-tier strategy. For each eligible field, longest first:
+
+1. Tier 1 (preferred): the LLM is asked for a concise summary
+   (`EVIDENCE_SUMMARY_TARGET_CHARS`, default `800`) that explicitly
+   preserves commit SHAs, PR/issue numbers, file paths, technical
+   trade-offs, and stated intent. Output is prefixed with
+   `[pre-summarized]` in the condensed copy.
+2. Tier 2 (fallback): deterministic head+tail truncation with a
+   visible elision marker (`[... content truncated: N chars elided
+   ...]`). Used when the LLM is unavailable or returns an empty
+   reply. Output is prefixed with `[truncated]`.
+
+Fields touched vs. preserved. Condensation is intentionally narrow:
+
+- **Condensed**: `pull_requests[i].body`,
+  `pull_requests[i].review_comments[j].body`, `issues[i].body`,
+  `issues[i].comments[j].body`, only when length exceeds
+  [config.EVIDENCE_FIELD_MAX_CHARS](../git_explainer/config.py#L46)
+  (default `3000`).
+- **Preserved verbatim**: all commit SHAs (full and short),
+  PR/issue numbers, titles, labels, URLs, `file_contexts` entries,
+  `diffs` entries, and any other structural metadata.
+
+Report shape. The condenser returns a
+[CondensationReport](../git_explainer/evidence_condenser.py#L35)
+serialized as the `condensation` field of the
+[ExplanationResult](../git_explainer/orchestrator.py#L44):
+
+```json
+"condensation": {
+  "original_size": 48123,
+  "condensed_size": 22041,
+  "fields_condensed": ["pr#42.body", "issue#7.comments[2].body"],
+  "method_used": "llm"   // "none" | "llm" | "heuristic" | "mixed"
+}
+```
+
+Caller visibility. The `ExplanationResult` returned to the caller
+still contains the **un-condensed originals** for
+`pull_requests`, `issues`, `file_contexts`, and `diffs`. Only the
+synthesis LLM sees the condensed view, via
+`build_synthesis_prompt(condensed_evidence, ...)` in
+[orchestrator.py](../git_explainer/orchestrator.py#L133). Downstream
+consumers (notebooks, eval harness, `--use-llm-judge`) therefore score
+the agent against the full evidence, not the compressed view.
+
+## 6. Threat model
 
 The diagram maps each risk to the control that addresses it, with
 file:line references.
@@ -213,7 +283,7 @@ flowchart LR
     class C1,C2,C3,C4a,C4b,C4c,C5,C6,C7,C8,C9 control
 ```
 
-## 6. Evaluation
+## 7. Evaluation
 
 Scored by [eval/evaluate.py](../eval/evaluate.py) against 20 benchmark
 cases in [eval/benchmark.json](../eval/benchmark.json).
