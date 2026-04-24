@@ -20,6 +20,3 @@ Thumbs.db
 
 # Memory store
 .cache/
-
-# Eval results
-eval/results.json
