@@ -39,3 +39,50 @@ def test_memory_tracks_hits_and_misses(tmp_path):
     assert memory.get_pr(99) == {"number": 99}
     assert memory.stats()["misses"] == 1
     assert memory.stats()["hits"] == 1
+
+
+def test_etag_cache_round_trip(tmp_path):
+    repo = _make_repo(tmp_path)
+    memory = ExplainerMemory(str(repo))
+
+    url = "https://api.github.com/repos/o/r/issues/1"
+    assert memory.get_etag_cache(url) is None
+
+    memory.set_etag_cache(url, 'W/"tag-v1"', {"number": 1, "title": "t"})
+    entry = memory.get_etag_cache(url)
+    assert entry is not None
+    assert entry["etag"] == 'W/"tag-v1"'
+    assert entry["data"] == {"number": 1, "title": "t"}
+    assert "last_fetched" in entry
+
+    memory.flush()
+    reloaded = ExplainerMemory(str(repo))
+    persisted = reloaded.get_etag_cache(url)
+    assert persisted is not None
+    assert persisted["etag"] == 'W/"tag-v1"'
+
+
+def test_etag_cache_backward_compat_with_old_payload(tmp_path):
+    """Old cache files without an 'etags' section should still load cleanly."""
+    repo = _make_repo(tmp_path)
+    import json
+    old_payload = {
+        "version": 1,
+        "commit_prs": {"abc": [1]},
+        "prs": {},
+        "pr_comments": {},
+        "issues": {},
+        "issue_comments": {},
+        "contexts": {},
+        "diffs": {},
+        # NOTE: no 'etags' key
+    }
+    (repo / ".git_explainer_cache.json").write_text(
+        json.dumps(old_payload), encoding="utf-8"
+    )
+    memory = ExplainerMemory(str(repo))
+    assert memory.get_commit_prs("abc") == [1]
+    assert memory.get_etag_cache("https://example.com/any") is None
+    # New entries should still be writable.
+    memory.set_etag_cache("https://example.com/any", "etag", {"data": 1})
+    assert memory.get_etag_cache("https://example.com/any")["etag"] == "etag"

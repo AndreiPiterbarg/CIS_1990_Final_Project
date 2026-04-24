@@ -20,6 +20,17 @@ GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "4096"))
 
 # GitHub API
 GITHUB_API_BASE = os.getenv("GITHUB_API_BASE", "https://api.github.com")
+# When the observed X-RateLimit-Remaining drops below this threshold we sleep
+# preemptively until the reset timestamp. GitHub resets hourly, but each
+# individual preemptive sleep is also clamped (see GITHUB_RATE_LIMIT_SLEEP_CAP).
+GITHUB_RATE_LIMIT_MIN_REMAINING = int(
+    os.getenv("GITHUB_RATE_LIMIT_MIN_REMAINING", "10")
+)
+# Upper bound (seconds) on any single preemptive rate-limit sleep. Kept small
+# so tests and interactive runs don't hang indefinitely.
+GITHUB_RATE_LIMIT_SLEEP_CAP = int(
+    os.getenv("GITHUB_RATE_LIMIT_SLEEP_CAP", "60")
+)
 
 # Agent defaults from the PRD
 DEFAULT_MAX_LINE_SPAN = int(os.getenv("GIT_EXPLAINER_MAX_LINE_SPAN", "200"))

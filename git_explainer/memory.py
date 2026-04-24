@@ -20,6 +20,9 @@ def _default_payload() -> dict[str, Any]:
         "issue_comments": {},
         "contexts": {},
         "diffs": {},
+        # HTTP-level ETag cache keyed by request URL.
+        # {url: {"etag": str, "data": Any, "last_fetched": float}}
+        "etags": {},
     }
 
 
@@ -83,6 +86,29 @@ class ExplainerMemory:
 
     def set_diff(self, key: str, diff_data: dict) -> None:
         self._set("diffs", key, diff_data)
+
+    def get_etag_cache(self, url: str) -> dict | None:
+        """Return the cached {etag, data, last_fetched} entry for url, or None.
+
+        This bypasses the hits/misses counters used by the semantic caches —
+        ETag caching is an HTTP-layer concern and is tracked separately when
+        needed by the caller.
+        """
+        bucket = self._payload.setdefault("etags", {})
+        entry = bucket.get(url)
+        if isinstance(entry, dict) and "etag" in entry and "data" in entry:
+            return entry
+        return None
+
+    def set_etag_cache(self, url: str, etag: str, data: Any) -> None:
+        """Store a fresh ETag/data pair for url."""
+        import time as _time
+        bucket = self._payload.setdefault("etags", {})
+        entry = {"etag": etag, "data": data, "last_fetched": _time.time()}
+        if bucket.get(url) == entry:
+            return
+        bucket[url] = entry
+        self._dirty = True
 
     def flush(self) -> None:
         if not self._dirty:

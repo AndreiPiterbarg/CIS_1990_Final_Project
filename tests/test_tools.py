@@ -969,7 +969,7 @@ SAMPLE_ISSUE_JSON = {
 
 
 class TestFetchIssue:
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    @patch("git_explainer.tools.github_http.requests.get")
     def test_success(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -996,7 +996,7 @@ class TestFetchIssue:
             "user": "octocat",
         }
 
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    @patch("git_explainer.tools.github_http.requests.get")
     def test_null_body_becomes_empty_string(self, mock_get):
         data = {**SAMPLE_ISSUE_JSON, "body": None}
         mock_resp = MagicMock(status_code=200)
@@ -1006,43 +1006,48 @@ class TestFetchIssue:
         result = fetch_issue("o", "r", 1)
         assert result["body"] == ""
 
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    @patch("git_explainer.tools.github_http.requests.get")
     def test_404_returns_none(self, mock_get):
         mock_get.return_value = MagicMock(status_code=404)
 
         assert fetch_issue("o", "r", 999) is None
 
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    @patch("git_explainer.tools.github_http.requests.get")
     def test_401_raises(self, mock_get):
         mock_get.return_value = MagicMock(status_code=401)
 
         with pytest.raises(requests.HTTPError, match="auth error"):
             fetch_issue("o", "r", 1)
 
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    @patch("git_explainer.tools.github_http.requests.get")
     def test_403_raises(self, mock_get):
         mock_get.return_value = MagicMock(status_code=403)
 
         with pytest.raises(requests.HTTPError, match="auth error"):
             fetch_issue("o", "r", 1)
 
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
-    def test_429_raises(self, mock_get):
-        mock_get.return_value = MagicMock(status_code=429)
+    @patch("git_explainer.tools.github_http.time.sleep")
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_429_raises(self, mock_get, _mock_sleep):
+        mock_resp = MagicMock(status_code=429)
+        mock_resp.headers = {}
+        mock_get.return_value = mock_resp
 
         with pytest.raises(requests.HTTPError, match="rate limit"):
             fetch_issue("o", "r", 1)
 
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
-    def test_500_raises_via_raise_for_status(self, mock_get):
+    @patch("git_explainer.tools.github_http.time.sleep")
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_500_raises_via_raise_for_status(self, mock_get, _mock_sleep):
         mock_resp = MagicMock(status_code=500)
+        mock_resp.headers = {}
         mock_resp.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
         mock_get.return_value = mock_resp
 
         with pytest.raises(requests.HTTPError, match="500"):
             fetch_issue("o", "r", 1)
 
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    @patch("git_explainer.tools.github_http.requests.get")
     def test_empty_labels(self, mock_get):
         data = {**SAMPLE_ISSUE_JSON, "labels": []}
         mock_resp = MagicMock(status_code=200)
@@ -1113,7 +1118,7 @@ class TestFetchIssues:
 
 
 class TestFetchIssueComments:
-    @patch("git_explainer.tools.github_issue_lookup.requests.get")
+    @patch("git_explainer.tools.github_http.requests.get")
     def test_returns_issue_comments(self, mock_get):
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = [
@@ -1134,3 +1139,295 @@ class TestFetchIssueComments:
                 "created_at": "2024-06-01T10:00:00Z",
             }
         ]
+
+
+# ---------------------------------------------------------------------------
+# github_http (shared HTTP helper, rate-limit + ETag support)
+# ---------------------------------------------------------------------------
+from git_explainer.tools import github_http
+from git_explainer.tools.github_http import (
+    GitHubResponse,
+    _RATE_LIMIT_STATE,
+    _reset_rate_limit_state_for_tests,
+    get_rate_limit_state,
+    github_get_json,
+)
+from git_explainer.memory import ExplainerMemory
+
+
+def _make_resp(
+    status_code: int = 200,
+    json_data=None,
+    headers: dict | None = None,
+) -> MagicMock:
+    """Build a realistic mock ``requests.Response`` object."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = json_data if json_data is not None else {}
+    resp.headers = headers if headers is not None else {}
+    return resp
+
+
+@pytest.fixture(autouse=False)
+def reset_rate_limit():
+    """Clear rate-limit state before and after each test that opts in."""
+    _reset_rate_limit_state_for_tests()
+    yield
+    _reset_rate_limit_state_for_tests()
+
+
+class TestGitHubHttp:
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_200_parses_rate_limit_headers(self, mock_get, reset_rate_limit):
+        headers = {
+            "X-RateLimit-Limit": "5000",
+            "X-RateLimit-Remaining": "4999",
+            "X-RateLimit-Reset": "1700000000",
+        }
+        mock_get.return_value = _make_resp(
+            200, json_data={"ok": True}, headers=headers
+        )
+        resp = github_get_json("https://api.github.com/x")
+
+        assert isinstance(resp, GitHubResponse)
+        assert resp.data == {"ok": True}
+        assert resp.status_code == 200
+        state = get_rate_limit_state()
+        assert state["limit"] == 5000
+        assert state["remaining"] == 4999
+        assert state["reset"] == 1700000000
+
+    @patch("git_explainer.tools.github_http.time.sleep")
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_preemptive_sleep_when_below_threshold(
+        self, mock_get, mock_sleep, reset_rate_limit
+    ):
+        # Seed the module state to be below the threshold.
+        _RATE_LIMIT_STATE["remaining"] = 1
+        _RATE_LIMIT_STATE["reset"] = int(__import__("time").time()) + 10
+
+        mock_get.return_value = _make_resp(
+            200,
+            json_data={"ok": True},
+            headers={
+                "X-RateLimit-Limit": "5000",
+                "X-RateLimit-Remaining": "5000",
+                "X-RateLimit-Reset": str(int(__import__("time").time()) + 3600),
+            },
+        )
+        github_get_json("https://api.github.com/y")
+
+        assert mock_sleep.called
+        # First call duration should be bounded (we seeded reset ~10s from now).
+        first_call_duration = mock_sleep.call_args_list[0][0][0]
+        assert 0 < first_call_duration <= github_http.GITHUB_RATE_LIMIT_SLEEP_CAP + 1
+
+    @patch("git_explainer.tools.github_http.time.sleep")
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_no_preemptive_sleep_when_remaining_above_threshold(
+        self, mock_get, mock_sleep, reset_rate_limit
+    ):
+        _RATE_LIMIT_STATE["remaining"] = 4999
+        _RATE_LIMIT_STATE["reset"] = int(__import__("time").time()) + 3600
+
+        mock_get.return_value = _make_resp(
+            200,
+            json_data={"ok": True},
+            headers={
+                "X-RateLimit-Remaining": "4998",
+                "X-RateLimit-Reset": str(int(__import__("time").time()) + 3600),
+            },
+        )
+        github_get_json("https://api.github.com/z")
+
+        mock_sleep.assert_not_called()
+
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_request_without_cached_etag_omits_if_none_match(
+        self, mock_get, reset_rate_limit, tmp_path
+    ):
+        mock_get.return_value = _make_resp(
+            200,
+            json_data={"ok": True},
+            headers={"ETag": 'W/"abc"'},
+        )
+        memory = ExplainerMemory(str(tmp_path))
+        github_get_json("https://api.github.com/first", memory=memory)
+
+        sent_headers = mock_get.call_args[1]["headers"]
+        assert "If-None-Match" not in sent_headers
+
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_etag_round_trip_sends_if_none_match_and_caches(
+        self, mock_get, reset_rate_limit, tmp_path
+    ):
+        # First response: 200 with an ETag, memory should cache it.
+        mock_get.return_value = _make_resp(
+            200,
+            json_data={"value": 1},
+            headers={"ETag": 'W/"deadbeef"'},
+        )
+        memory = ExplainerMemory(str(tmp_path))
+        url = "https://api.github.com/repos/x/y/issues/1"
+        resp1 = github_get_json(url, memory=memory)
+        assert resp1.status_code == 200
+        assert memory.get_etag_cache(url)["etag"] == 'W/"deadbeef"'
+
+        # Second request → server returns 304, helper must send If-None-Match
+        # and serve from the cache.
+        mock_get.return_value = _make_resp(
+            304,
+            headers={"ETag": 'W/"deadbeef"'},
+        )
+        resp2 = github_get_json(url, memory=memory)
+
+        sent_headers = mock_get.call_args_list[-1][1]["headers"]
+        assert sent_headers.get("If-None-Match") == 'W/"deadbeef"'
+        assert resp2.from_cache is True
+        assert resp2.status_code == 304
+        assert resp2.data == {"value": 1}
+
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_304_returns_cached_data_without_reparsing(
+        self, mock_get, reset_rate_limit, tmp_path
+    ):
+        memory = ExplainerMemory(str(tmp_path))
+        url = "https://api.github.com/repos/x/y/issues/2"
+        memory.set_etag_cache(url, 'W/"v1"', {"cached": "payload"})
+
+        resp = _make_resp(304, headers={})
+        # Guard: 304 path must NOT call resp.json().
+        resp.json.side_effect = AssertionError("json() should not be called on 304")
+        mock_get.return_value = resp
+
+        result = github_get_json(url, memory=memory)
+        assert result.from_cache is True
+        assert result.data == {"cached": "payload"}
+
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_200_updates_etag_cache_on_refresh(
+        self, mock_get, reset_rate_limit, tmp_path
+    ):
+        memory = ExplainerMemory(str(tmp_path))
+        url = "https://api.github.com/repos/x/y/issues/3"
+        memory.set_etag_cache(url, 'W/"old"', {"old": True})
+
+        mock_get.return_value = _make_resp(
+            200,
+            json_data={"new": True},
+            headers={"ETag": 'W/"new"'},
+        )
+        resp = github_get_json(url, memory=memory)
+        assert resp.data == {"new": True}
+        assert memory.get_etag_cache(url)["etag"] == 'W/"new"'
+        assert memory.get_etag_cache(url)["data"] == {"new": True}
+
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_no_memory_means_no_caching(self, mock_get, reset_rate_limit):
+        mock_get.return_value = _make_resp(
+            200,
+            json_data={"ok": True},
+            headers={"ETag": 'W/"x"'},
+        )
+        # Should not raise even with memory=None.
+        result = github_get_json("https://api.github.com/n", memory=None)
+        assert result.data == {"ok": True}
+        sent_headers = mock_get.call_args[1]["headers"]
+        assert "If-None-Match" not in sent_headers
+
+    @patch("git_explainer.tools.github_http.time.sleep")
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_403_with_remaining_zero_sleeps_rather_than_fails(
+        self, mock_get, mock_sleep, reset_rate_limit
+    ):
+        # First attempt: 403 with Remaining=0 → treated as rate-limit.
+        # Second attempt: succeeds.
+        rate_limit_headers = {
+            "X-RateLimit-Limit": "5000",
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(int(__import__("time").time()) + 5),
+        }
+        success_headers = {
+            "X-RateLimit-Remaining": "4999",
+            "X-RateLimit-Reset": str(int(__import__("time").time()) + 3600),
+        }
+        mock_get.side_effect = [
+            _make_resp(403, headers=rate_limit_headers),
+            _make_resp(200, json_data={"ok": True}, headers=success_headers),
+        ]
+
+        resp = github_get_json("https://api.github.com/q")
+        assert resp.status_code == 200
+        assert resp.data == {"ok": True}
+        # We slept because of the 403 rate-limit detection.
+        assert mock_sleep.called
+
+    @patch("git_explainer.tools.github_http.time.sleep")
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_429_retry_with_backoff(self, mock_get, mock_sleep, reset_rate_limit):
+        # Two 429s, then success. Exponential backoff should fire twice.
+        mock_get.side_effect = [
+            _make_resp(429, headers={}),
+            _make_resp(429, headers={}),
+            _make_resp(200, json_data={"ok": True}, headers={}),
+        ]
+        resp = github_get_json("https://api.github.com/r")
+        assert resp.status_code == 200
+        # First backoff: 2**0 == 1, second: 2**1 == 2.
+        sleep_args = [call.args[0] for call in mock_sleep.call_args_list]
+        assert 1 in sleep_args
+        assert 2 in sleep_args
+
+    @patch("git_explainer.tools.github_http.time.sleep")
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_5xx_retry_with_backoff(self, mock_get, mock_sleep, reset_rate_limit):
+        mock_get.side_effect = [
+            _make_resp(502, headers={}),
+            _make_resp(200, json_data={"ok": True}, headers={}),
+        ]
+        resp = github_get_json("https://api.github.com/s")
+        assert resp.status_code == 200
+        assert mock_sleep.called
+
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_404_returns_none_data(self, mock_get, reset_rate_limit):
+        mock_get.return_value = _make_resp(404, headers={})
+        resp = github_get_json("https://api.github.com/missing")
+        assert resp.status_code == 404
+        assert resp.data is None
+
+    @patch("git_explainer.tools.github_http.requests.get")
+    def test_memory_threaded_through_fetch_pr(
+        self, mock_get, reset_rate_limit, tmp_path
+    ):
+        """End-to-end: fetch_pr uses the memory instance for ETag caching."""
+        from git_explainer.tools.github_pr_lookup import fetch_pr
+
+        pr_payload = {
+            "number": 42,
+            "title": "A PR",
+            "state": "open",
+            "merged": False,
+            "body": "body",
+            "user": {"login": "octo"},
+            "created_at": "2024-01-01T00:00:00Z",
+            "merged_at": None,
+            "base": {"ref": "main"},
+            "head": {"ref": "feat"},
+            "merge_commit_sha": None,
+        }
+        mock_get.return_value = _make_resp(
+            200,
+            json_data=pr_payload,
+            headers={"ETag": 'W/"prtag"'},
+        )
+        memory = ExplainerMemory(str(tmp_path))
+        result = fetch_pr("octo", "hello", 42, memory=memory)
+        assert result is not None
+        assert result["number"] == 42
+        # The ETag should be stored under the PR's URL.
+        cached = memory.get_etag_cache(
+            "https://api.github.com/repos/octo/hello/pulls/42"
+        )
+        assert cached is not None
+        assert cached["etag"] == 'W/"prtag"'
