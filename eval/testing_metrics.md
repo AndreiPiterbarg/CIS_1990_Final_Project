@@ -1,31 +1,34 @@
 # Git Explainer Testing Metrics
 
-This document explains what the evaluation metrics in [evaluate.py](/Users/alistairking/Projects/upenn-courses/cis-1990/CIS_1990_Final_Project/eval/evaluate.py) actually measure, what they do not measure, and how to make the benchmark more rigorous.
+This document explains what the evaluation metrics in `eval/evaluate.py` actually measure, what they do not measure, and how to make the benchmark more rigorous.
 
 ## Bottom line
 
-The current results do not look outright fabricated, but they are easier to score well on than the headline numbers suggest.
+The current harness is stricter than before, but the headline numbers still overstate factual confidence.
 
-- `95%` pass rate does not mean `95%` factual accuracy.
-- `100%` retrieval accuracy is computed only on cases that have hand-written retrieval targets.
-- `98.5%` citation coverage and `100%` citation validity are close to format-compliance metrics because the synthesizer is instructed to put citations in every sentence.
+- `90.5%` pass rate (across cases that actually ran) does not mean `90.5%` factual accuracy, and the two failing cases (`requests-api-surface`, `requests-exceptions-imports`) are external-repo spans where the stricter `pr_numbers: []` / `issue_numbers: []` scoring now flags unexpected PR or issue hits.
+- `100%` retrieval accuracy is computed only on cases that have hand-written positive retrieval targets.
+- `98.6%` citation coverage and `100%` citation validity are still close to format-compliance metrics because the synthesizer is instructed to put citations in nearly every sentence.
 - `4.99/5` faithfulness is a proxy score, not a human or independently verified honesty score.
 
 As the benchmark is written today:
 
-- There are `20` total cases.
-- Only `10` cases have any retrieval targets at all.
-- `3` external-repo cases currently contribute no retrieval targets.
-- `2` cases include `commit_message_contains: []`, `8` include `pr_numbers: []`, and `11` include `issue_numbers: []`; those checks are structurally always true under the current scorer.
+- There are `22` total cases.
+- Only `10` cases have any positive retrieval targets at all.
+- `3` external-repo cases currently contribute no positive retrieval targets.
+- `1` case includes `commit_message_contains: []`, `7` include `pr_numbers: []`, and `10` include `issue_numbers: []`.
+- `3` cases use `expects_no_pull_requests: true`, and `3` use `expects_no_issues: true`.
+- `commit_message_contains: []` is skipped as vacuous, while `expects_no_*` is a real negative assertion. For backward compatibility, `pr_numbers: []` and `issue_numbers: []` now also mean "return none", not automatic passes.
+- `use_llm: true` cases are skipped (not failed) when the harness is run with `--no-llm`, and are reported separately in the summary so pass rate is not diluted by forced-fallback runs.
 - Many `explanation_contains` checks only require a filename or a citation marker such as `[commit:`.
 
 ## Metric definitions
 
 ### Pass rate
 
-`pass_rate = passed_cases / total_cases`
+`pass_rate = passed_cases / (passed + failed + errors)`
 
-A case passes when every configured check in `expected` is true. This is only as strong as the checks for that case. If a case only asks for a filename mention and a fallback flag, it can pass without proving the explanation is deeply correct.
+A case passes when every configured check in `expected` is true. This is only as strong as the checks for that case. If a case only asks for a filename mention and a fallback flag, it can pass without proving the explanation is deeply correct. Skipped cases (for example, `use_llm: true` cases under `--no-llm`) are excluded from the pass-rate denominator and reported separately in the summary.
 
 ### Retrieval accuracy
 
@@ -42,7 +45,8 @@ The scorer currently counts hits for:
 Important limitations:
 
 - This is a recall-style metric against hand-picked targets, not a precision metric.
-- Cases without any retrieval targets contribute `n/a`, not `0`.
+- Cases without any positive retrieval targets contribute `n/a`, not `0`.
+- Negative assertions such as `expects_no_pull_requests` and `expects_no_issues` strengthen pass/fail scoring, but they do not currently increase the retrieval target denominator.
 - Matching commit-message substrings is weaker than matching exact commits or exact diff hunks.
 
 ### Citation coverage
@@ -92,15 +96,15 @@ This is the cleanest metric in the harness, but it should still be compared only
 - offline fallback vs LLM mode
 - warm cache vs cold cache
 
-## Why the current notebook can look too good
+## Why the current harness can still look too good
 
-Several design choices push the numbers upward:
+Several design choices can still push the numbers upward:
 
 - The notebook previously claimed to default to an offline smoke run, but its config cell immediately overrode itself to run the full benchmark. That made the notebook behavior less transparent than the markdown around it suggested.
 - Many cases check only for shallow evidence of success, such as a filename mention or the presence of `[commit:`.
-- Empty expected lists are treated as passing checks, which inflates the count of “all checks passed.”
+- Legacy `commit_message_contains: []` placeholders are still vacuous, even though empty PR/issue lists are no longer automatic passes.
 - Citation metrics are rewarded by construction because the system prompt and fallback summary enforce citation-heavy output.
-- External-repo cases do not yet have frozen gold retrieval targets, so they mostly test “can the agent say something plausible with citations?” rather than “did it retrieve the right evidence?”
+- External-repo cases do not yet have frozen gold retrieval targets, so they mostly test "can the agent say something plausible with citations?" rather than "did it retrieve the right evidence?"
 
 ## Recommended rigor improvements
 
@@ -114,19 +118,14 @@ Report these separately:
 
 This prevents citation-heavy prose from being mistaken for honesty.
 
-### 2. Replace empty-list checks with explicit negative assertions
+### 2. Prefer explicit negative assertions over legacy empty lists
 
-Instead of:
-
-- `pr_numbers: []`
-- `issue_numbers: []`
-
-use dedicated checks such as:
+The scorer now treats `pr_numbers: []` and `issue_numbers: []` as "expect no returned PRs/issues" for backward compatibility, but new cases should prefer dedicated checks such as:
 
 - `expects_no_pull_requests`
 - `expects_no_issues`
 
-That makes “no linked metadata” a real test instead of an always-true placeholder.
+`commit_message_contains: []` remains vacuous and is skipped entirely, so benchmark authors should avoid it unless the absence of a commit-message target is intentional.
 
 ### 3. Use stronger gold targets
 
@@ -165,17 +164,17 @@ External repos are useful, but they need stable gold data. For each external cas
 - expected commit count range
 - expected symbol or diff evidence
 
-Otherwise the benchmark mixes “real retrieval” with “plausible narration.”
+Otherwise the benchmark mixes "real retrieval" with "plausible narration."
 
-### 7. Add abstention and uncertainty cases
+### 7. Continue adding abstention and uncertainty cases
 
-A strong explainer should sometimes say:
+The new abstention cases improve coverage, but the suite still needs broader support for cases where the agent should say:
 
 - the evidence is insufficient
 - no relevant commit was found
-- the PR/issue link is missing
+- the PR or issue link is missing
 
-Today the harness rewards completeness much more than careful abstention.
+Without those cases, the harness still rewards completeness more than careful abstention.
 
 ### 8. Run repeated trials for LLM mode
 
@@ -192,17 +191,18 @@ One successful run is not enough to characterize stochastic behavior.
 
 Every aggregate metric should state how many cases actually contributed to it. For example:
 
-- retrieval accuracy: `10/20` cases had retrieval targets
-- faithfulness proxy: `14/20` cases produced a scored explanation
+- retrieval accuracy: `10/22` cases had positive retrieval targets
+- faithfulness proxy: `16/22` cases produced a scored explanation
 
 Without denominators, the numbers read as more comprehensive than they are.
 
 ## Practical interpretation
 
-A fair reading of the current notebook is:
+A fair reading of the current harness is:
 
-- the harness can verify basic plumbing and guardrails
+- it can verify basic plumbing, guardrails, and some abstention behavior
 - the fallback path is very good at producing citation-shaped output
-- the current benchmark does not yet strongly prove honesty or deep factual faithfulness
+- the stricter empty-list scoring now catches unsupported PR or issue links that previously slipped through
+- the current benchmark still does not strongly prove honesty or deep factual faithfulness
 
-That means the current results are useful as a smoke test, but not yet strong enough to be presented as a rigorous honesty evaluation.
+That means the current results are useful as a smoke test plus a light regression suite, but not yet strong enough to present as a rigorous honesty evaluation.
