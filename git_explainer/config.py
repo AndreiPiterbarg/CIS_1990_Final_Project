@@ -38,6 +38,14 @@ DEFAULT_MAX_COMMITS = int(os.getenv("GIT_EXPLAINER_MAX_COMMITS", "5"))
 DEFAULT_CONTEXT_RADIUS = int(os.getenv("GIT_EXPLAINER_CONTEXT_RADIUS", "30"))
 CACHE_FILENAME = os.getenv("GIT_EXPLAINER_CACHE_FILENAME", ".git_explainer_cache.json")
 
+# Evidence condensation thresholds. When the serialized evidence exceeds
+# EVIDENCE_CHAR_BUDGET we try to shrink long-form fields (PR/issue bodies and
+# their comment threads) so they fit in the synthesis model's context. Short
+# fields are left alone. See git_explainer/evidence_condenser.py.
+EVIDENCE_CHAR_BUDGET = int(os.getenv("EVIDENCE_CHAR_BUDGET", "30000"))
+EVIDENCE_FIELD_MAX_CHARS = int(os.getenv("EVIDENCE_FIELD_MAX_CHARS", "3000"))
+EVIDENCE_SUMMARY_TARGET_CHARS = int(os.getenv("EVIDENCE_SUMMARY_TARGET_CHARS", "800"))
+
 
 def github_headers(*, accept: str = "application/vnd.github.v3+json") -> dict[str, str]:
     """Return GitHub headers with the configured token, if any."""
