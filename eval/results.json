@@ -1,40 +1,44 @@
 {
   "summary": {
     "benchmark": {
-      "case_count": 22,
-      "repo_count": 3
+      "case_count": 29,
+      "repo_count": 5
     },
     "counts": {
-      "passed": 19,
-      "failed": 2,
+      "passed": 28,
+      "failed": 0,
       "errors": 0,
       "skipped": 1,
-      "total": 22
+      "total": 29
     },
-    "pass_rate": 0.905,
+    "pass_rate": 1.0,
     "retrieval": {
-      "matched_count": 15,
-      "target_count": 15,
-      "accuracy": 1.0
+      "matched_count": 74,
+      "target_count": 74,
+      "accuracy": 1.0,
+      "commit_sha_matches": 19,
+      "commit_sha_total": 19,
+      "commit_sha_accuracy": 1.0
     },
     "citation": {
-      "cited_sentence_count": 136,
-      "citable_sentence_count": 138,
-      "coverage": 0.986,
-      "valid_citation_count": 191,
-      "citation_count": 191,
+      "cited_sentence_count": 211,
+      "citable_sentence_count": 213,
+      "coverage": 0.991,
+      "valid_citation_count": 382,
+      "citation_count": 382,
       "validity": 1.0
     },
     "faithfulness_rubric": {
       "mode": "proxy",
-      "average": 4.994,
-      "case_count": 15
+      "average": 4.996,
+      "case_count": 22
     },
+    "llm_judge": null,
     "latency": {
-      "total_seconds": 35.14,
-      "average_seconds": 1.67,
-      "p50_seconds": 0.047,
-      "p95_seconds": 0.797
+      "total_seconds": 66.641,
+      "average_seconds": 2.379,
+      "p50_seconds": 0.438,
+      "p95_seconds": 11.743
     }
   },
   "cases": [
@@ -47,16 +51,21 @@
         "pr_numbers": true,
         "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.047,
+      "elapsed_seconds": 0.438,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 3,
-        "retrieval_target_count": 3,
+        "retrieval_matched_count": 5,
+        "retrieval_target_count": 5,
         "retrieval_accuracy": 1.0,
         "retrieval_breakdown": {
           "commit_messages": {
+            "matched": 2,
+            "targets": 2
+          },
+          "commit_shas": {
             "matched": 2,
             "targets": 2
           },
@@ -65,6 +74,8 @@
             "targets": 1
           }
         },
+        "commit_sha_matches": 2,
+        "commit_sha_total": 2,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -94,20 +105,27 @@
         "pr_numbers": true,
         "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.047,
+      "elapsed_seconds": 0.422,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 2,
-        "retrieval_target_count": 2,
+        "retrieval_matched_count": 4,
+        "retrieval_target_count": 4,
         "retrieval_accuracy": 1.0,
         "retrieval_breakdown": {
           "commit_messages": {
             "matched": 2,
             "targets": 2
+          },
+          "commit_shas": {
+            "matched": 2,
+            "targets": 2
           }
         },
+        "commit_sha_matches": 2,
+        "commit_sha_total": 2,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -137,20 +155,27 @@
         "pr_numbers": true,
         "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.047,
+      "elapsed_seconds": 0.421,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 1,
-        "retrieval_target_count": 1,
+        "retrieval_matched_count": 3,
+        "retrieval_target_count": 3,
         "retrieval_accuracy": 1.0,
         "retrieval_breakdown": {
           "commit_messages": {
             "matched": 1,
             "targets": 1
+          },
+          "commit_shas": {
+            "matched": 2,
+            "targets": 2
           }
         },
+        "commit_sha_matches": 2,
+        "commit_sha_total": 2,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -180,20 +205,27 @@
         "pr_numbers": true,
         "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.063,
+      "elapsed_seconds": 0.422,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 1,
-        "retrieval_target_count": 1,
+        "retrieval_matched_count": 2,
+        "retrieval_target_count": 2,
         "retrieval_accuracy": 1.0,
         "retrieval_breakdown": {
           "commit_messages": {
             "matched": 1,
             "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
           }
         },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -223,16 +255,21 @@
         "pr_numbers": true,
         "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.046,
+      "elapsed_seconds": 0.438,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 2,
-        "retrieval_target_count": 2,
+        "retrieval_matched_count": 3,
+        "retrieval_target_count": 3,
         "retrieval_accuracy": 1.0,
         "retrieval_breakdown": {
           "commit_messages": {
+            "matched": 1,
+            "targets": 1
+          },
+          "commit_shas": {
             "matched": 1,
             "targets": 1
           },
@@ -241,6 +278,8 @@
             "targets": 1
           }
         },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -270,20 +309,27 @@
         "pr_numbers": true,
         "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.047,
+      "elapsed_seconds": 0.39,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 1,
-        "retrieval_target_count": 1,
+        "retrieval_matched_count": 2,
+        "retrieval_target_count": 2,
         "retrieval_accuracy": 1.0,
         "retrieval_breakdown": {
           "commit_messages": {
             "matched": 1,
             "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
           }
         },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -337,6 +383,8 @@
             "targets": 1
           }
         },
+        "commit_sha_matches": 0,
+        "commit_sha_total": 0,
         "citable_sentence_count": 8,
         "cited_sentence_count": 8,
         "citation_coverage": 1.0,
@@ -367,13 +415,15 @@
         "explanation_contains": true,
         "used_fallback": true
       },
-      "elapsed_seconds": 0.047,
+      "elapsed_seconds": 0.438,
       "error": null,
       "metrics": {
         "retrieval_matched_count": 0,
         "retrieval_target_count": 0,
         "retrieval_accuracy": null,
         "retrieval_breakdown": {},
+        "commit_sha_matches": 0,
+        "commit_sha_total": 0,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -411,6 +461,58 @@
         "retrieval_target_count": 0,
         "retrieval_accuracy": null,
         "retrieval_breakdown": {},
+        "commit_sha_matches": 0,
+        "commit_sha_total": 0,
+        "citable_sentence_count": 9,
+        "cited_sentence_count": 9,
+        "citation_coverage": 1.0,
+        "citation_count": 9,
+        "valid_citation_count": 9,
+        "citation_validity": 1.0,
+        "faithfulness_rubric": {
+          "mode": "proxy",
+          "overall": 5.0,
+          "components": {
+            "answer_completeness": 5.0,
+            "retrieval_support": 5.0,
+            "citation_grounding": 5.0,
+            "scope_honesty": 5.0
+          }
+        }
+      },
+      "skipped": false,
+      "skip_reason": null
+    },
+    {
+      "case_id": "abstention-gitignore-init-commit",
+      "passed": true,
+      "checks": {
+        "min_commits": true,
+        "commit_message_contains": true,
+        "expects_no_pull_requests": true,
+        "expects_no_issues": true,
+        "explanation_contains": true,
+        "used_fallback": true,
+        "expected_commit_shas": true
+      },
+      "elapsed_seconds": 0.39,
+      "error": null,
+      "metrics": {
+        "retrieval_matched_count": 2,
+        "retrieval_target_count": 2,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_messages": {
+            "matched": 1,
+            "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -439,20 +541,36 @@
         "pr_numbers": true,
         "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.703,
+      "elapsed_seconds": 12.594,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 0,
-        "retrieval_target_count": 0,
-        "retrieval_accuracy": null,
-        "retrieval_breakdown": {},
-        "citable_sentence_count": 9,
-        "cited_sentence_count": 9,
+        "retrieval_matched_count": 10,
+        "retrieval_target_count": 10,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 5,
+            "targets": 5
+          },
+          "issues": {
+            "matched": 4,
+            "targets": 4
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 11,
+        "cited_sentence_count": 11,
         "citation_coverage": 1.0,
-        "citation_count": 9,
-        "valid_citation_count": 9,
+        "citation_count": 33,
+        "valid_citation_count": 33,
         "citation_validity": 1.0,
         "faithfulness_rubric": {
           "mode": "proxy",
@@ -470,26 +588,42 @@
     },
     {
       "case_id": "requests-api-surface",
-      "passed": false,
+      "passed": true,
       "checks": {
         "min_commits": true,
-        "pr_numbers": false,
-        "issue_numbers": false,
+        "pr_numbers": true,
+        "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 32.781,
+      "elapsed_seconds": 12.11,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 0,
-        "retrieval_target_count": 0,
-        "retrieval_accuracy": null,
-        "retrieval_breakdown": {},
-        "citable_sentence_count": 10,
-        "cited_sentence_count": 10,
+        "retrieval_matched_count": 9,
+        "retrieval_target_count": 9,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 5,
+            "targets": 5
+          },
+          "issues": {
+            "matched": 3,
+            "targets": 3
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 8,
+        "cited_sentence_count": 8,
         "citation_coverage": 1.0,
-        "citation_count": 16,
-        "valid_citation_count": 16,
+        "citation_count": 26,
+        "valid_citation_count": 26,
         "citation_validity": 1.0,
         "faithfulness_rubric": {
           "mode": "proxy",
@@ -515,7 +649,7 @@
         "resolved_file_path": true,
         "resolved_preview_contains": true
       },
-      "elapsed_seconds": 0.094,
+      "elapsed_seconds": 0.859,
       "error": null,
       "metrics": {
         "retrieval_matched_count": 2,
@@ -531,6 +665,8 @@
             "targets": 1
           }
         },
+        "commit_sha_matches": 0,
+        "commit_sha_total": 0,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -561,7 +697,7 @@
         "resolved_file_path": true,
         "resolved_preview_contains": true
       },
-      "elapsed_seconds": 0.094,
+      "elapsed_seconds": 0.891,
       "error": null,
       "metrics": {
         "retrieval_matched_count": 2,
@@ -577,6 +713,8 @@
             "targets": 1
           }
         },
+        "commit_sha_matches": 0,
+        "commit_sha_total": 0,
         "citable_sentence_count": 9,
         "cited_sentence_count": 9,
         "citation_coverage": 1.0,
@@ -668,18 +806,20 @@
       "checks": {
         "used_fallback": true
       },
-      "elapsed_seconds": 0.797,
+      "elapsed_seconds": 1.406,
       "error": null,
       "metrics": {
         "retrieval_matched_count": 0,
         "retrieval_target_count": 0,
         "retrieval_accuracy": null,
         "retrieval_breakdown": {},
+        "commit_sha_matches": 0,
+        "commit_sha_total": 0,
         "citable_sentence_count": 11,
         "cited_sentence_count": 9,
         "citation_coverage": 0.818,
-        "citation_count": 9,
-        "valid_citation_count": 9,
+        "citation_count": 18,
+        "valid_citation_count": 18,
         "citation_validity": 1.0,
         "faithfulness_rubric": {
           "mode": "proxy",
@@ -702,7 +842,7 @@
         "expects_error": true,
         "error_contains": true
       },
-      "elapsed_seconds": 0.0,
+      "elapsed_seconds": 0.36,
       "error": null,
       "metrics": {},
       "skipped": false,
@@ -710,21 +850,355 @@
     },
     {
       "case_id": "requests-exceptions-imports",
-      "passed": false,
+      "passed": true,
       "checks": {
         "min_commits": true,
-        "pr_numbers": false,
-        "issue_numbers": false,
+        "pr_numbers": true,
+        "issue_numbers": true,
         "explanation_contains": true,
-        "used_fallback": true
+        "used_fallback": true,
+        "expected_commit_shas": true
       },
-      "elapsed_seconds": 0.109,
+      "elapsed_seconds": 11.062,
       "error": null,
       "metrics": {
-        "retrieval_matched_count": 0,
-        "retrieval_target_count": 0,
-        "retrieval_accuracy": null,
-        "retrieval_breakdown": {},
+        "retrieval_matched_count": 10,
+        "retrieval_target_count": 10,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 5,
+            "targets": 5
+          },
+          "issues": {
+            "matched": 4,
+            "targets": 4
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 11,
+        "cited_sentence_count": 11,
+        "citation_coverage": 1.0,
+        "citation_count": 33,
+        "valid_citation_count": 33,
+        "citation_validity": 1.0,
+        "faithfulness_rubric": {
+          "mode": "proxy",
+          "overall": 5.0,
+          "components": {
+            "answer_completeness": 5.0,
+            "retrieval_support": 5.0,
+            "citation_grounding": 5.0,
+            "scope_honesty": 5.0
+          }
+        }
+      },
+      "skipped": false,
+      "skip_reason": null
+    },
+    {
+      "case_id": "react-use-optimistic-hook",
+      "passed": true,
+      "checks": {
+        "min_commits": true,
+        "commit_message_contains": true,
+        "pr_numbers": true,
+        "explanation_contains": true,
+        "used_fallback": true,
+        "expected_commit_shas": true
+      },
+      "elapsed_seconds": 4.375,
+      "error": null,
+      "metrics": {
+        "retrieval_matched_count": 3,
+        "retrieval_target_count": 3,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_messages": {
+            "matched": 1,
+            "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 1,
+            "targets": 1
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 11,
+        "cited_sentence_count": 11,
+        "citation_coverage": 1.0,
+        "citation_count": 20,
+        "valid_citation_count": 20,
+        "citation_validity": 1.0,
+        "faithfulness_rubric": {
+          "mode": "proxy",
+          "overall": 5.0,
+          "components": {
+            "answer_completeness": 5.0,
+            "retrieval_support": 5.0,
+            "citation_grounding": 5.0,
+            "scope_honesty": 5.0
+          }
+        }
+      },
+      "skipped": false,
+      "skip_reason": null
+    },
+    {
+      "case_id": "react-start-transition-noop-import",
+      "passed": true,
+      "checks": {
+        "min_commits": true,
+        "commit_message_contains": true,
+        "pr_numbers": true,
+        "explanation_contains": true,
+        "used_fallback": true,
+        "expected_commit_shas": true
+      },
+      "elapsed_seconds": 3.563,
+      "error": null,
+      "metrics": {
+        "retrieval_matched_count": 3,
+        "retrieval_target_count": 3,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_messages": {
+            "matched": 1,
+            "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 1,
+            "targets": 1
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 11,
+        "cited_sentence_count": 11,
+        "citation_coverage": 1.0,
+        "citation_count": 20,
+        "valid_citation_count": 20,
+        "citation_validity": 1.0,
+        "faithfulness_rubric": {
+          "mode": "proxy",
+          "overall": 5.0,
+          "components": {
+            "answer_completeness": 5.0,
+            "retrieval_support": 5.0,
+            "citation_grounding": 5.0,
+            "scope_honesty": 5.0
+          }
+        }
+      },
+      "skipped": false,
+      "skip_reason": null
+    },
+    {
+      "case_id": "react-taint-binary-flight-removal",
+      "passed": true,
+      "checks": {
+        "min_commits": true,
+        "commit_message_contains": true,
+        "pr_numbers": true,
+        "explanation_contains": true,
+        "used_fallback": true,
+        "expected_commit_shas": true
+      },
+      "elapsed_seconds": 3.578,
+      "error": null,
+      "metrics": {
+        "retrieval_matched_count": 3,
+        "retrieval_target_count": 3,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_messages": {
+            "matched": 1,
+            "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 1,
+            "targets": 1
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 11,
+        "cited_sentence_count": 11,
+        "citation_coverage": 1.0,
+        "citation_count": 20,
+        "valid_citation_count": 20,
+        "citation_validity": 1.0,
+        "faithfulness_rubric": {
+          "mode": "proxy",
+          "overall": 5.0,
+          "components": {
+            "answer_completeness": 5.0,
+            "retrieval_support": 5.0,
+            "citation_grounding": 5.0,
+            "scope_honesty": 5.0
+          }
+        }
+      },
+      "skipped": false,
+      "skip_reason": null
+    },
+    {
+      "case_id": "cpython-stdev-infinite-check",
+      "passed": true,
+      "checks": {
+        "min_commits": true,
+        "commit_message_contains": true,
+        "pr_numbers": true,
+        "explanation_contains": true,
+        "used_fallback": true,
+        "expected_commit_shas": true
+      },
+      "elapsed_seconds": 5.187,
+      "error": null,
+      "metrics": {
+        "retrieval_matched_count": 3,
+        "retrieval_target_count": 3,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_messages": {
+            "matched": 1,
+            "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 1,
+            "targets": 1
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 11,
+        "cited_sentence_count": 11,
+        "citation_coverage": 1.0,
+        "citation_count": 23,
+        "valid_citation_count": 23,
+        "citation_validity": 1.0,
+        "faithfulness_rubric": {
+          "mode": "proxy",
+          "overall": 5.0,
+          "components": {
+            "answer_completeness": 5.0,
+            "retrieval_support": 5.0,
+            "citation_grounding": 5.0,
+            "scope_honesty": 5.0
+          }
+        }
+      },
+      "skipped": false,
+      "skip_reason": null
+    },
+    {
+      "case_id": "cpython-fmean-speedup",
+      "passed": true,
+      "checks": {
+        "min_commits": true,
+        "commit_message_contains": true,
+        "pr_numbers": true,
+        "explanation_contains": true,
+        "used_fallback": true,
+        "expected_commit_shas": true
+      },
+      "elapsed_seconds": 2.547,
+      "error": null,
+      "metrics": {
+        "retrieval_matched_count": 4,
+        "retrieval_target_count": 4,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_messages": {
+            "matched": 2,
+            "targets": 2
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 1,
+            "targets": 1
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
+        "citable_sentence_count": 11,
+        "cited_sentence_count": 11,
+        "citation_coverage": 1.0,
+        "citation_count": 23,
+        "valid_citation_count": 23,
+        "citation_validity": 1.0,
+        "faithfulness_rubric": {
+          "mode": "proxy",
+          "overall": 5.0,
+          "components": {
+            "answer_completeness": 5.0,
+            "retrieval_support": 5.0,
+            "citation_grounding": 5.0,
+            "scope_honesty": 5.0
+          }
+        }
+      },
+      "skipped": false,
+      "skip_reason": null
+    },
+    {
+      "case_id": "cpython-json-array-hook",
+      "passed": true,
+      "checks": {
+        "min_commits": true,
+        "commit_message_contains": true,
+        "pr_numbers": true,
+        "explanation_contains": true,
+        "used_fallback": true,
+        "expected_commit_shas": true
+      },
+      "elapsed_seconds": 4.563,
+      "error": null,
+      "metrics": {
+        "retrieval_matched_count": 3,
+        "retrieval_target_count": 3,
+        "retrieval_accuracy": 1.0,
+        "retrieval_breakdown": {
+          "commit_messages": {
+            "matched": 1,
+            "targets": 1
+          },
+          "commit_shas": {
+            "matched": 1,
+            "targets": 1
+          },
+          "pull_requests": {
+            "matched": 1,
+            "targets": 1
+          }
+        },
+        "commit_sha_matches": 1,
+        "commit_sha_total": 1,
         "citable_sentence_count": 10,
         "cited_sentence_count": 10,
         "citation_coverage": 1.0,
