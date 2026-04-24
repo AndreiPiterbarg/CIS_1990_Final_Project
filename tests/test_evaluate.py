@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 
 from eval.evaluate import (
     BenchmarkCase,
     CaseScore,
+    _compute_llm_judge_faithfulness,
     filter_cases,
     load_benchmark,
     save_results,
@@ -443,6 +445,167 @@ class TestScoreCase:
 
 
 # ---------------------------------------------------------------------------
+# expected_commit_shas scoring
+# ---------------------------------------------------------------------------
+
+
+class TestExpectedCommitShas:
+    """Tests covering the expected_commit_shas ground-truth matcher."""
+
+    _FULL_SHA_A = "a" * 40
+    _FULL_SHA_B = "b" * 40
+
+    def _commit(self, full_sha: str, message: str = "") -> dict:
+        return {
+            "sha": full_sha[:7],
+            "full_sha": full_sha,
+            "author": "Dev",
+            "date": "2024-01-01",
+            "message": message or "Commit",
+        }
+
+    def test_full_sha_match(self):
+        case = _make_case(
+            expected={"expected_commit_shas": [self._FULL_SHA_A]},
+        )
+        result = _make_result(commits=[self._commit(self._FULL_SHA_A, "Fix thing")])
+
+        score = score_case(case, result, elapsed=0.1)
+
+        assert score.checks["expected_commit_shas"] is True
+        assert score.metrics["commit_sha_total"] == 1
+        assert score.metrics["commit_sha_matches"] == 1
+        assert score.passed is True
+
+    def test_prefix_match_short_sha_in_result(self):
+        # Simulate a result that only exposes a 7-char short SHA.
+        short = self._FULL_SHA_A[:7]
+        case = _make_case(
+            expected={"expected_commit_shas": [self._FULL_SHA_A]},
+        )
+        result = _make_result(
+            commits=[{"sha": short, "full_sha": "", "author": "Dev",
+                      "date": "2024-01-01", "message": "Fix"}]
+        )
+
+        score = score_case(case, result, elapsed=0.1)
+
+        assert score.checks["expected_commit_shas"] is True
+        assert score.metrics["commit_sha_matches"] == 1
+
+    def test_miss_when_expected_sha_not_in_commits(self):
+        case = _make_case(
+            expected={"expected_commit_shas": [self._FULL_SHA_A]},
+        )
+        result = _make_result(commits=[self._commit(self._FULL_SHA_B, "Other")])
+
+        score = score_case(case, result, elapsed=0.1)
+
+        assert score.checks["expected_commit_shas"] is False
+        assert score.metrics["commit_sha_matches"] == 0
+        assert score.metrics["commit_sha_total"] == 1
+        assert score.passed is False
+
+    def test_multiple_expected_shas_must_all_match(self):
+        case = _make_case(
+            expected={
+                "expected_commit_shas": [self._FULL_SHA_A, self._FULL_SHA_B]
+            },
+        )
+        # Only one of the two expected SHAs is present — should fail.
+        result = _make_result(commits=[self._commit(self._FULL_SHA_A, "One")])
+
+        score = score_case(case, result, elapsed=0.1)
+
+        assert score.checks["expected_commit_shas"] is False
+        assert score.metrics["commit_sha_matches"] == 1
+        assert score.metrics["commit_sha_total"] == 2
+        # Retrieval accuracy should reflect the partial match (1/2).
+        assert score.metrics["retrieval_accuracy"] == 0.5
+
+    def test_empty_expected_shas_skips_check(self):
+        case = _make_case(expected={"expected_commit_shas": []})
+        result = _make_result()
+
+        score = score_case(case, result, elapsed=0.1)
+
+        assert "expected_commit_shas" not in score.checks
+        # No SHA targets contributed to retrieval.
+        assert score.metrics["commit_sha_total"] == 0
+
+    def test_sha_matches_contribute_to_retrieval_accuracy(self):
+        case = _make_case(
+            expected={
+                "commit_message_contains": ["fix"],
+                "expected_commit_shas": [self._FULL_SHA_A],
+            },
+        )
+        result = _make_result(
+            commits=[self._commit(self._FULL_SHA_A, "Fix bug")],
+        )
+
+        score = score_case(case, result, elapsed=0.1)
+
+        # One message target + one SHA target, both hit.
+        assert score.metrics["retrieval_target_count"] == 2
+        assert score.metrics["retrieval_matched_count"] == 2
+        assert score.metrics["retrieval_accuracy"] == 1.0
+
+    def test_benchmark_parses_expected_commit_shas_field(self, tmp_path):
+        cases_data = [
+            {
+                **MINIMAL_CASE_DICT,
+                "id": "with-shas",
+                "expected": {
+                    "min_commits": 1,
+                    "expected_commit_shas": [self._FULL_SHA_A],
+                },
+            }
+        ]
+        bench_file = tmp_path / "benchmark.json"
+        bench_file.write_text(json.dumps(cases_data), encoding="utf-8")
+
+        parsed = load_benchmark(bench_file)
+
+        assert parsed[0].expected["expected_commit_shas"] == [self._FULL_SHA_A]
+
+    def test_summary_aggregates_commit_sha_counts(self):
+        cases = [_make_case(id="c1"), _make_case(id="c2")]
+        scores = [
+            CaseScore(
+                case_id="c1",
+                passed=True,
+                checks={"expected_commit_shas": True},
+                elapsed_seconds=0.1,
+                metrics={
+                    "retrieval_matched_count": 1,
+                    "retrieval_target_count": 1,
+                    "commit_sha_matches": 1,
+                    "commit_sha_total": 1,
+                },
+            ),
+            CaseScore(
+                case_id="c2",
+                passed=False,
+                checks={"expected_commit_shas": False},
+                elapsed_seconds=0.2,
+                metrics={
+                    "retrieval_matched_count": 0,
+                    "retrieval_target_count": 1,
+                    "commit_sha_matches": 0,
+                    "commit_sha_total": 1,
+                },
+            ),
+        ]
+
+        summary = summarize_scores(cases, scores, total_elapsed=0.3)
+
+        assert summary["retrieval"]["commit_sha_matches"] == 1
+        assert summary["retrieval"]["commit_sha_total"] == 2
+        assert summary["retrieval"]["commit_sha_accuracy"] == 0.5
+
+
+# ---------------------------------------------------------------------------
 # filter_cases
 # ---------------------------------------------------------------------------
 
@@ -585,3 +748,320 @@ class TestSummaries:
         assert payload["summary"] == summary
         assert payload["cases"][0]["case_id"] == "case-1"
         assert payload["cases"][0]["metrics"]["retrieval_accuracy"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# LLM-as-judge faithfulness
+# ---------------------------------------------------------------------------
+
+
+def _judge_result() -> dict:
+    """Build a result suitable for the LLM judge: has commits, PRs, and explanation."""
+    return {
+        "query": {},
+        "explanation": {
+            "what_changed": "Added a new parser module [commit:abc1234].",
+            "why": "PR #42 motivated the change [pr:#42].",
+            "tradeoffs": "Slightly more code [commit:abc1234].",
+            "limitations": "Only tested on happy path [commit:abc1234].",
+            "summary": "Parser now exists [commit:abc1234].",
+        },
+        "commits": [
+            {
+                "sha": "abc1234",
+                "full_sha": "abc1234" + ("0" * 33),
+                "author": "Alice",
+                "date": "2024-06-15",
+                "message": "Add parser module",
+            }
+        ],
+        "pull_requests": [{"number": 42, "title": "Add parser", "body": "Adds a parser."}],
+        "issues": [],
+        "file_contexts": [],
+        "diffs": [],
+        "cache_stats": {"hits": 0, "misses": 0, "writes": 0},
+        "used_fallback": False,
+        "resolved_target": None,
+    }
+
+
+class TestLLMJudgeFaithfulness:
+    def test_accurate_rating_parsed(self):
+        case = _make_case()
+        response = json.dumps(
+            {
+                "rating": "accurate",
+                "reasoning": "The explanation aligns with the PR and commit message.",
+                "contradictions": [],
+            }
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", return_value=response) as mock_chat,
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "accurate"
+        assert judgment["passes"] is True
+        assert judgment["contradictions"] == []
+        assert judgment["raw_response"] is None
+        assert mock_chat.call_count == 1
+
+    def test_partially_accurate_rating_parsed(self):
+        case = _make_case()
+        response = json.dumps(
+            {
+                "rating": "partially accurate",
+                "reasoning": "Missing key detail about motivation.",
+                "contradictions": ["no mention of PR body's performance note"],
+            }
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", return_value=response),
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "partially accurate"
+        assert judgment["passes"] is True
+        assert judgment["contradictions"] == ["no mention of PR body's performance note"]
+
+    def test_hallucinated_rating_parsed(self):
+        case = _make_case()
+        response = json.dumps(
+            {
+                "rating": "hallucinated",
+                "reasoning": "Cites an issue that does not appear in evidence.",
+                "contradictions": ["issue #99 not in evidence"],
+            }
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", return_value=response),
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "hallucinated"
+        assert judgment["passes"] is False
+        assert judgment["contradictions"] == ["issue #99 not in evidence"]
+
+    def test_skipped_when_llm_unavailable(self):
+        case = _make_case()
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=False),
+            patch("eval.evaluate.llm.chat") as mock_chat,
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "skipped"
+        assert judgment["passes"] is False
+        assert judgment["reasoning"] == "llm unavailable"
+        mock_chat.assert_not_called()
+
+    def test_retries_once_on_parse_failure(self):
+        case = _make_case()
+        good_json = json.dumps(
+            {
+                "rating": "accurate",
+                "reasoning": "Grounded in the evidence.",
+                "contradictions": [],
+            }
+        )
+        responses = ["Sure! Here's my rating: the explanation is fine.", good_json]
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", side_effect=responses) as mock_chat,
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "accurate"
+        assert judgment["passes"] is True
+        assert judgment["raw_response"] is None
+        assert mock_chat.call_count == 2
+
+    def test_double_parse_failure_returns_unscored(self):
+        case = _make_case()
+        responses = [
+            "I cannot rate this because I'm not sure.",
+            "Still prose, no JSON here.",
+        ]
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", side_effect=responses) as mock_chat,
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "unscored"
+        assert judgment["passes"] is False
+        assert judgment["raw_response"] == "Still prose, no JSON here."
+        assert mock_chat.call_count == 2
+
+    def test_handles_markdown_fenced_json(self):
+        case = _make_case()
+        fenced = (
+            "```json\n"
+            + json.dumps(
+                {
+                    "rating": "accurate",
+                    "reasoning": "Grounded.",
+                    "contradictions": [],
+                }
+            )
+            + "\n```"
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", return_value=fenced),
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "accurate"
+        assert judgment["passes"] is True
+
+    def test_unknown_rating_treated_as_parse_failure(self):
+        case = _make_case()
+        bad_rating = json.dumps(
+            {"rating": "mostly right", "reasoning": "...", "contradictions": []}
+        )
+        good_json = json.dumps(
+            {"rating": "partially accurate", "reasoning": "ok", "contradictions": []}
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", side_effect=[bad_rating, good_json]),
+        ):
+            judgment = _compute_llm_judge_faithfulness(_judge_result(), case)
+
+        assert judgment["rating"] == "partially accurate"
+
+    def test_score_case_includes_judge_when_enabled(self):
+        case = _make_case()
+        response = json.dumps(
+            {
+                "rating": "accurate",
+                "reasoning": "Matches the evidence.",
+                "contradictions": [],
+            }
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", return_value=response),
+        ):
+            score = score_case(case, _judge_result(), elapsed=0.1, use_llm_judge=True)
+
+        assert "llm_judge" in score.metrics
+        assert score.metrics["llm_judge"]["rating"] == "accurate"
+
+    def test_score_case_omits_judge_when_disabled(self):
+        case = _make_case()
+        with patch("eval.evaluate.llm.chat") as mock_chat:
+            score = score_case(case, _judge_result(), elapsed=0.1, use_llm_judge=False)
+
+        assert "llm_judge" not in score.metrics
+        mock_chat.assert_not_called()
+
+    def test_per_case_min_rating_check_enforced(self):
+        case = _make_case(expected={"llm_judge_min_rating": "accurate"})
+        response = json.dumps(
+            {
+                "rating": "partially accurate",
+                "reasoning": "Missing detail.",
+                "contradictions": [],
+            }
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", return_value=response),
+        ):
+            score = score_case(case, _judge_result(), elapsed=0.1, use_llm_judge=True)
+
+        assert score.checks["llm_judge_min_rating"] is False
+        assert score.passed is False
+
+    def test_per_case_min_rating_partial_accepts_partial(self):
+        case = _make_case(expected={"llm_judge_min_rating": "partially accurate"})
+        response = json.dumps(
+            {
+                "rating": "partially accurate",
+                "reasoning": "Missing detail.",
+                "contradictions": [],
+            }
+        )
+        with (
+            patch("eval.evaluate.llm.is_available", return_value=True),
+            patch("eval.evaluate.llm.chat", return_value=response),
+        ):
+            score = score_case(case, _judge_result(), elapsed=0.1, use_llm_judge=True)
+
+        assert score.checks["llm_judge_min_rating"] is True
+
+
+class TestSummarizeLLMJudge:
+    def test_aggregates_llm_judge_counts_and_pass_rate(self):
+        cases = [_make_case(id=f"c{i}") for i in range(1, 6)]
+        scores = [
+            CaseScore(
+                case_id="c1",
+                passed=True,
+                checks={},
+                elapsed_seconds=0.1,
+                metrics={"llm_judge": {"rating": "accurate", "passes": True}},
+            ),
+            CaseScore(
+                case_id="c2",
+                passed=True,
+                checks={},
+                elapsed_seconds=0.1,
+                metrics={"llm_judge": {"rating": "partially accurate", "passes": True}},
+            ),
+            CaseScore(
+                case_id="c3",
+                passed=False,
+                checks={},
+                elapsed_seconds=0.1,
+                metrics={"llm_judge": {"rating": "hallucinated", "passes": False}},
+            ),
+            CaseScore(
+                case_id="c4",
+                passed=False,
+                checks={},
+                elapsed_seconds=0.1,
+                metrics={"llm_judge": {"rating": "unscored", "passes": False}},
+            ),
+            CaseScore(
+                case_id="c5",
+                passed=False,
+                checks={},
+                elapsed_seconds=0.1,
+                metrics={"llm_judge": {"rating": "skipped", "passes": False}},
+            ),
+        ]
+
+        summary = summarize_scores(cases, scores, total_elapsed=0.5)
+
+        judge = summary["llm_judge"]
+        assert judge is not None
+        assert judge["accurate_count"] == 1
+        assert judge["partially_accurate_count"] == 1
+        assert judge["hallucinated_count"] == 1
+        assert judge["unscored_count"] == 1
+        assert judge["skipped_count"] == 1
+        assert judge["scored_count"] == 3
+        # 2 passing / 3 scored (excludes skipped + unscored)
+        assert judge["pass_rate"] == pytest.approx(0.667, abs=0.001)
+
+    def test_summary_omits_llm_judge_when_absent(self):
+        cases = [_make_case(id="c1")]
+        scores = [
+            CaseScore(
+                case_id="c1",
+                passed=True,
+                checks={},
+                elapsed_seconds=0.1,
+                metrics={},
+            ),
+        ]
+
+        summary = summarize_scores(cases, scores, total_elapsed=0.1)
+
+        assert summary["llm_judge"] is None

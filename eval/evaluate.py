@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from git_explainer import llm
 from git_explainer.orchestrator import ExplanationResult, explain_code_history
 
 
@@ -42,6 +43,10 @@ class BenchmarkCase:
     use_llm: bool
     expected: dict[str, Any]
     tags: list[str] = field(default_factory=list)
+    # Mirrors the CLI flag. Defaults to True so new cases inherit the
+    # stricter guardrail; per-case opt-out is done by setting this to
+    # ``false`` in benchmark.json (e.g., for no-owner/no-repo cases).
+    enforce_public_repo: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BenchmarkCase:
@@ -60,6 +65,7 @@ class BenchmarkCase:
             use_llm=data["use_llm"],
             expected=data.get("expected", {}),
             tags=data.get("tags", []),
+            enforce_public_repo=bool(data.get("enforce_public_repo", True)),
         )
 
 
@@ -181,9 +187,11 @@ def setup_repos(cases: list[BenchmarkCase]) -> dict[str, str]:
             repo_map[key] = str(Path.cwd())
         else:
             dest = tempfile.mkdtemp(prefix="eval_repo_")
+            # Depth 2000 so external repos reach far enough back for the
+            # ground-truth commits referenced by `expected_commit_shas`.
             try:
                 subprocess.run(
-                    ["git", "clone", "--depth", "50", url, dest],
+                    ["git", "clone", "--depth", "2000", url, dest],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -228,7 +236,13 @@ def score_error_case(case: BenchmarkCase, error: str | None, elapsed: float) -> 
     )
 
 
-def score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -> CaseScore:
+def score_case(
+    case: BenchmarkCase,
+    result: ExplanationResult,
+    elapsed: float,
+    *,
+    use_llm_judge: bool = False,
+) -> CaseScore:
     """Score an agent result against expected values from the benchmark case."""
     expected = case.expected
     checks: dict[str, bool] = {}
@@ -306,6 +320,13 @@ def score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -
             for phrase in expected["resolved_preview_contains"]
         )
 
+    if "expected_commit_shas" in expected:
+        expected_shas = expected["expected_commit_shas"] or []
+        if expected_shas:
+            checks["expected_commit_shas"] = all(
+                _commit_sha_matches(sha, result["commits"]) for sha in expected_shas
+            )
+
     retrieval_metrics = _compute_retrieval_metrics(case, result)
     citation_metrics = _compute_citation_metrics(result)
     faithfulness_metrics = _compute_faithfulness_metrics(
@@ -338,17 +359,32 @@ def score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -
             faithfulness_metrics["overall"] >= expected["faithfulness_rubric_min"]
         )
 
+    llm_judge: dict[str, Any] | None = None
+    if use_llm_judge:
+        llm_judge = _compute_llm_judge_faithfulness(result, case)
+
+        min_rating = expected.get("llm_judge_min_rating")
+        if min_rating is not None:
+            checks["llm_judge_min_rating"] = _llm_judge_meets_min_rating(
+                llm_judge.get("rating", "unscored"),
+                min_rating,
+            )
+
     passed = all(checks.values()) if checks else True
+    metrics: dict[str, Any] = {
+        **retrieval_metrics,
+        **citation_metrics,
+        "faithfulness_rubric": faithfulness_metrics,
+    }
+    if llm_judge is not None:
+        metrics["llm_judge"] = llm_judge
+
     return CaseScore(
         case_id=case.id,
         passed=passed,
         checks=checks,
         elapsed_seconds=round(elapsed, 3),
-        metrics={
-            **retrieval_metrics,
-            **citation_metrics,
-            "faithfulness_rubric": faithfulness_metrics,
-        },
+        metrics=metrics,
     )
 
 
@@ -373,6 +409,15 @@ def _compute_retrieval_metrics(
         breakdown["commit_messages"] = {"matched": hit_count, "targets": len(commit_targets)}
         matched += hit_count
         targets += len(commit_targets)
+
+    expected_shas = expected.get("expected_commit_shas", []) or []
+    if expected_shas:
+        hit_count = sum(
+            1 for sha in expected_shas if _commit_sha_matches(sha, result["commits"])
+        )
+        breakdown["commit_shas"] = {"matched": hit_count, "targets": len(expected_shas)}
+        matched += hit_count
+        targets += len(expected_shas)
 
     pr_targets = expected.get("pr_numbers", [])
     if pr_targets:
@@ -406,12 +451,36 @@ def _compute_retrieval_metrics(
         targets += len(matched_terms)
 
     accuracy = _safe_ratio(matched, targets)
+    sha_breakdown = breakdown.get("commit_shas", {"matched": 0, "targets": 0})
     return {
         "retrieval_matched_count": matched,
         "retrieval_target_count": targets,
         "retrieval_accuracy": accuracy,
         "retrieval_breakdown": breakdown,
+        "commit_sha_matches": sha_breakdown["matched"],
+        "commit_sha_total": sha_breakdown["targets"],
     }
+
+
+def _commit_sha_matches(expected_sha: str, commits: list[dict[str, Any]]) -> bool:
+    """Return True if any commit in the result matches `expected_sha`.
+
+    The match is order-insensitive: the expected SHA is taken as the ground
+    truth. Either the commit's full SHA equals `expected_sha`, or the commit's
+    short SHA is a prefix of `expected_sha` (common when the agent only
+    surfaces 7-character SHAs), or vice versa.
+    """
+    if not expected_sha:
+        return False
+    expected = expected_sha.lower()
+    for commit in commits:
+        full = str(commit.get("full_sha", "")).lower()
+        short = str(commit.get("sha", "")).lower()
+        if full and (full == expected or full.startswith(expected) or expected.startswith(full)):
+            return True
+        if short and (short == expected or expected.startswith(short) or short.startswith(expected)):
+            return True
+    return False
 
 
 def _compute_citation_metrics(result: ExplanationResult) -> dict[str, Any]:
@@ -507,11 +576,228 @@ def _compute_faithfulness_metrics(
     }
 
 
+_LLM_JUDGE_SYSTEM_PROMPT = (
+    "You are an impartial evaluator of Git history explanations. "
+    "Your job is to rate whether an agent's explanation faithfully reflects ONLY "
+    "the evidence it was shown (pull request titles/bodies, issue titles/bodies, "
+    "and commit messages). You MUST NOT rely on outside knowledge about the "
+    "repository, project, or author.\n\n"
+    "Return exactly one JSON object — no markdown fences, no prose before or "
+    "after — with these keys:\n"
+    "  \"rating\": one of \"accurate\", \"partially accurate\", \"hallucinated\"\n"
+    "  \"reasoning\": a single-sentence justification grounded in the evidence\n"
+    "  \"contradictions\": a list of strings naming specific contradictions "
+    "(empty list if none)\n\n"
+    "Rating definitions:\n"
+    "  - \"accurate\": The explanation does not contradict the evidence. Claims "
+    "unsupported by the evidence are acceptable ONLY when the agent clearly "
+    "states uncertainty or says no evidence was found. Abstention is fine.\n"
+    "  - \"partially accurate\": The explanation has a partial contradiction, "
+    "or omits an important detail that the evidence clearly establishes.\n"
+    "  - \"hallucinated\": The explanation makes confident factual claims that "
+    "the evidence does not support — for example, attributing intent to a PR "
+    "whose body does not support it, citing an issue that does not appear in "
+    "the evidence, or fabricating a reason for the change.\n\n"
+    "Respond with the JSON object only."
+)
+
+
+_LLM_JUDGE_EVIDENCE_CHAR_LIMIT = 2000
+
+
+def _truncate(text: str, limit: int = _LLM_JUDGE_EVIDENCE_CHAR_LIMIT) -> str:
+    """Truncate long free-form text so the judge prompt stays bounded."""
+    if text is None:
+        return ""
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "... [truncated]"
+
+
+def _build_llm_judge_prompt(result: ExplanationResult, case: BenchmarkCase) -> str:
+    """Build the user prompt presented to the judge."""
+    query_lines: list[str] = []
+    query_lines.append(f"Repo: {case.repo_url}")
+    if case.owner and case.repo_name:
+        query_lines.append(f"Repo slug: {case.owner}/{case.repo_name}")
+    if case.file_path:
+        query_lines.append(f"File: {case.file_path}")
+    if case.start_line is not None and case.end_line is not None:
+        query_lines.append(f"Line range: {case.start_line}-{case.end_line}")
+    if case.question:
+        query_lines.append(f"Question: {case.question}")
+
+    pr_blocks: list[str] = []
+    for pr in result.get("pull_requests", []) or []:
+        number = pr.get("number")
+        title = pr.get("title", "")
+        body = _truncate(pr.get("body", ""))
+        pr_blocks.append(
+            f"PR #{number}: {title}\n"
+            f"Body:\n{body if body else '(empty)'}"
+        )
+
+    issue_blocks: list[str] = []
+    for issue in result.get("issues", []) or []:
+        number = issue.get("number")
+        title = issue.get("title", "")
+        body = _truncate(issue.get("body", ""))
+        issue_blocks.append(
+            f"Issue #{number}: {title}\n"
+            f"Body:\n{body if body else '(empty)'}"
+        )
+
+    commit_blocks: list[str] = []
+    for commit in result.get("commits", []) or []:
+        sha = commit.get("sha") or commit.get("full_sha", "")
+        message = _truncate(commit.get("message", ""), limit=800)
+        commit_blocks.append(f"Commit {sha}: {message}")
+
+    sections = result.get("explanation", {}) or {}
+    explanation_text = (
+        "what_changed:\n" + str(sections.get("what_changed", "")) + "\n\n"
+        "why:\n" + str(sections.get("why", "")) + "\n\n"
+        "tradeoffs:\n" + str(sections.get("tradeoffs", "")) + "\n\n"
+        "limitations:\n" + str(sections.get("limitations", "")) + "\n\n"
+        "summary:\n" + str(sections.get("summary", ""))
+    )
+
+    def _fmt(blocks: list[str], label: str) -> str:
+        if not blocks:
+            return f"{label}: (none)"
+        return f"{label}:\n" + "\n\n".join(blocks)
+
+    return (
+        "Query:\n" + "\n".join(query_lines) + "\n\n"
+        + _fmt(pr_blocks, "Pull requests") + "\n\n"
+        + _fmt(issue_blocks, "Issues") + "\n\n"
+        + _fmt(commit_blocks, "Commits") + "\n\n"
+        + "Agent explanation:\n" + explanation_text + "\n\n"
+        + "Rate the explanation and return the JSON object described in the system prompt."
+    )
+
+
+_LLM_JUDGE_VALID_RATINGS = {"accurate", "partially accurate", "hallucinated"}
+_LLM_JUDGE_PASS_RATINGS = {"accurate", "partially accurate"}
+_LLM_JUDGE_RATING_ORDER = {
+    "hallucinated": 0,
+    "partially accurate": 1,
+    "accurate": 2,
+}
+
+
+def _parse_llm_judge_response(response: str) -> dict[str, Any] | None:
+    """Parse the judge's JSON response. Returns None on failure."""
+    if not response:
+        return None
+    text = response.strip()
+    # Strip a surrounding markdown fence if one slipped through.
+    if text.startswith("```"):
+        fence_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL)
+        if fence_match:
+            text = fence_match.group(1).strip()
+    # If there is prose around the JSON, find the first {...} block.
+    if not text.startswith("{"):
+        brace_start = text.find("{")
+        brace_end = text.rfind("}")
+        if brace_start == -1 or brace_end == -1 or brace_end <= brace_start:
+            return None
+        text = text[brace_start : brace_end + 1]
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    rating = str(parsed.get("rating", "")).strip().lower()
+    if rating not in _LLM_JUDGE_VALID_RATINGS:
+        return None
+    contradictions = parsed.get("contradictions", []) or []
+    if not isinstance(contradictions, list):
+        contradictions = [str(contradictions)]
+    return {
+        "rating": rating,
+        "reasoning": str(parsed.get("reasoning", "")).strip(),
+        "contradictions": [str(c) for c in contradictions],
+    }
+
+
+def _llm_judge_meets_min_rating(rating: str, min_rating: str) -> bool:
+    """Return True if `rating` is at least as good as `min_rating`."""
+    actual = _LLM_JUDGE_RATING_ORDER.get(str(rating).lower())
+    threshold = _LLM_JUDGE_RATING_ORDER.get(str(min_rating).lower())
+    if actual is None or threshold is None:
+        return False
+    return actual >= threshold
+
+
+def _compute_llm_judge_faithfulness(
+    result: ExplanationResult,
+    case: BenchmarkCase,
+) -> dict[str, Any]:
+    """Rate an agent explanation on the 3-point faithfulness rubric via an LLM judge."""
+    if not llm.is_available():
+        return {
+            "rating": "skipped",
+            "reasoning": "llm unavailable",
+            "contradictions": [],
+            "passes": False,
+            "raw_response": None,
+        }
+
+    prompt = _build_llm_judge_prompt(result, case)
+    raw_response: str | None = None
+
+    for attempt in range(2):
+        if attempt == 0:
+            user_content = prompt
+        else:
+            user_content = (
+                "Your previous response was not valid JSON. Return a SINGLE "
+                "JSON object ONLY, with keys rating, reasoning, contradictions. "
+                "No prose. No markdown fences.\n\n" + prompt
+            )
+        try:
+            raw_response = llm.chat(
+                user_content,
+                system_prompt=_LLM_JUDGE_SYSTEM_PROMPT,
+                temperature=0.0,
+            )
+        except Exception as exc:  # noqa: BLE001 — judge failure is non-fatal
+            return {
+                "rating": "unscored",
+                "reasoning": f"judge call failed: {type(exc).__name__}: {exc}",
+                "contradictions": [],
+                "passes": False,
+                "raw_response": None,
+            }
+
+        parsed = _parse_llm_judge_response(raw_response)
+        if parsed is not None:
+            return {
+                "rating": parsed["rating"],
+                "reasoning": parsed["reasoning"],
+                "contradictions": parsed["contradictions"],
+                "passes": parsed["rating"] in _LLM_JUDGE_PASS_RATINGS,
+                "raw_response": None,
+            }
+
+    return {
+        "rating": "unscored",
+        "reasoning": "failed to parse judge response as JSON after retry",
+        "contradictions": [],
+        "passes": False,
+        "raw_response": raw_response,
+    }
+
+
 def run_case(
     case: BenchmarkCase,
     repo_path: str,
     *,
     no_llm: bool = False,
+    use_llm_judge: bool = False,
 ) -> CaseScore:
     """Run a single benchmark case and return its score."""
     if not repo_path:
@@ -538,11 +824,12 @@ def run_case(
             repo_name=case.repo_name,
             max_commits=case.max_commits,
             use_llm=use_llm,
+            enforce_public_repo=case.enforce_public_repo,
         )
         elapsed = time.monotonic() - t0
         if expects_error:
             return score_error_case(case, None, elapsed)
-        return score_case(case, result, elapsed)
+        return score_case(case, result, elapsed, use_llm_judge=use_llm_judge)
     except Exception as exc:
         elapsed = time.monotonic() - t0
         error_msg = f"{type(exc).__name__}: {exc}"
@@ -627,12 +914,21 @@ def summarize_scores(
 
     retrieval_matched = 0
     retrieval_targets = 0
+    commit_sha_matches = 0
+    commit_sha_total = 0
     cited_sentences = 0
     citable_sentences = 0
     valid_citations = 0
     total_citations = 0
     faithfulness_scores: list[float] = []
     latencies = [score.elapsed_seconds for score in scores if not score.skipped]
+
+    llm_judge_accurate = 0
+    llm_judge_partial = 0
+    llm_judge_hallucinated = 0
+    llm_judge_unscored = 0
+    llm_judge_skipped = 0
+    llm_judge_any_present = False
 
     for score in scores:
         if score.skipped:
@@ -648,6 +944,8 @@ def summarize_scores(
 
         retrieval_matched += int(score.metrics.get("retrieval_matched_count", 0))
         retrieval_targets += int(score.metrics.get("retrieval_target_count", 0))
+        commit_sha_matches += int(score.metrics.get("commit_sha_matches", 0))
+        commit_sha_total += int(score.metrics.get("commit_sha_total", 0))
         cited_sentences += int(score.metrics.get("cited_sentence_count", 0))
         citable_sentences += int(score.metrics.get("citable_sentence_count", 0))
         valid_citations += int(score.metrics.get("valid_citation_count", 0))
@@ -656,6 +954,21 @@ def summarize_scores(
         faithfulness = score.metrics.get("faithfulness_rubric", {}).get("overall")
         if faithfulness is not None:
             faithfulness_scores.append(float(faithfulness))
+
+        judge = score.metrics.get("llm_judge")
+        if judge is not None:
+            llm_judge_any_present = True
+            rating = judge.get("rating")
+            if rating == "accurate":
+                llm_judge_accurate += 1
+            elif rating == "partially accurate":
+                llm_judge_partial += 1
+            elif rating == "hallucinated":
+                llm_judge_hallucinated += 1
+            elif rating == "skipped":
+                llm_judge_skipped += 1
+            else:
+                llm_judge_unscored += 1
 
     total = len(scores)
     ran_total = passed_count + failed_count + error_count
@@ -666,6 +979,23 @@ def summarize_scores(
         if faithfulness_scores
         else None
     )
+
+    llm_judge_scored = llm_judge_accurate + llm_judge_partial + llm_judge_hallucinated
+    llm_judge_pass_rate = _safe_ratio(
+        llm_judge_accurate + llm_judge_partial,
+        llm_judge_scored,
+    )
+    llm_judge_summary: dict[str, Any] | None = None
+    if llm_judge_any_present:
+        llm_judge_summary = {
+            "accurate_count": llm_judge_accurate,
+            "partially_accurate_count": llm_judge_partial,
+            "hallucinated_count": llm_judge_hallucinated,
+            "unscored_count": llm_judge_unscored,
+            "skipped_count": llm_judge_skipped,
+            "scored_count": llm_judge_scored,
+            "pass_rate": llm_judge_pass_rate,
+        }
 
     return {
         "benchmark": {
@@ -684,6 +1014,9 @@ def summarize_scores(
             "matched_count": retrieval_matched,
             "target_count": retrieval_targets,
             "accuracy": _safe_ratio(retrieval_matched, retrieval_targets),
+            "commit_sha_matches": commit_sha_matches,
+            "commit_sha_total": commit_sha_total,
+            "commit_sha_accuracy": _safe_ratio(commit_sha_matches, commit_sha_total),
         },
         "citation": {
             "cited_sentence_count": cited_sentences,
@@ -698,6 +1031,7 @@ def summarize_scores(
             "average": average_faithfulness,
             "case_count": len(faithfulness_scores),
         },
+        "llm_judge": llm_judge_summary,
         "latency": {
             "total_seconds": round(total_elapsed, 3),
             "average_seconds": average_latency,
@@ -752,6 +1086,11 @@ def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
             f"Retrieval accuracy: {retrieval['accuracy'] * 100:.1f}% "
             f"({retrieval['matched_count']}/{retrieval['target_count']} expected targets)"
         )
+    if retrieval.get("commit_sha_accuracy") is not None:
+        print(
+            f"Commit SHA match rate: {retrieval['commit_sha_accuracy'] * 100:.1f}% "
+            f"({retrieval['commit_sha_matches']}/{retrieval['commit_sha_total']} expected SHAs)"
+        )
     if citation["coverage"] is None:
         print("Citation coverage: n/a (no citable explanation sentences)")
     else:
@@ -771,6 +1110,33 @@ def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
             f"Faithfulness rubric ({faithfulness['mode']}): "
             f"{faithfulness['average']:.2f}/5.00"
         )
+    llm_judge = summary.get("llm_judge")
+    if llm_judge is not None:
+        print()
+        print("LLM-as-judge faithfulness:")
+        print(
+            f"  accurate: {llm_judge['accurate_count']}  "
+            f"partially accurate: {llm_judge['partially_accurate_count']}  "
+            f"hallucinated: {llm_judge['hallucinated_count']}"
+        )
+        print(
+            f"  unscored: {llm_judge['unscored_count']}  "
+            f"skipped: {llm_judge['skipped_count']}"
+        )
+        if llm_judge["pass_rate"] is None:
+            print(
+                "  Pass rate: n/a "
+                f"(0/{llm_judge['scored_count']} scored; "
+                f"{llm_judge['skipped_count']} skipped, "
+                f"{llm_judge['unscored_count']} unscored)"
+            )
+        else:
+            passing = llm_judge["accurate_count"] + llm_judge["partially_accurate_count"]
+            print(
+                f"  Pass rate: {llm_judge['pass_rate'] * 100:.1f}% "
+                f"({passing}/{llm_judge['scored_count']} scored cases "
+                f"rated accurate or partially accurate)"
+            )
     if latency["average_seconds"] is not None:
         print(
             f"Latency: avg {latency['average_seconds']:.2f}s | "
@@ -833,6 +1199,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override all cases to use_llm=False.",
     )
     parser.add_argument(
+        "--use-llm-judge",
+        action="store_true",
+        default=False,
+        help=(
+            "Run an LLM-as-judge faithfulness scorer per case. Requires a "
+            "configured LLM (e.g., GROQ_API_KEY). Adds one API call per case."
+        ),
+    )
+    parser.add_argument(
         "--benchmark-file",
         type=Path,
         default=Path("eval/benchmark.json"),
@@ -880,7 +1255,12 @@ def main(argv: list[str] | None = None) -> None:
             continue
         print(f"[{i}/{len(cases)}] Running {case.id}...")
         repo_path = repo_map.get(_repo_cache_key(case), "")
-        score = run_case(case, repo_path, no_llm=args.no_llm)
+        score = run_case(
+            case,
+            repo_path,
+            no_llm=args.no_llm,
+            use_llm_judge=args.use_llm_judge,
+        )
         scores.append(score)
 
     total_elapsed = time.monotonic() - total_start
