@@ -15,6 +15,10 @@
       "commit_message_contains": ["Switch LLM provider", "initial mockup"],
       "pr_numbers": [1],
       "issue_numbers": [],
+      "expected_commit_shas": [
+        "4c711bfc4861f860a0cb2e3b7e78739df5f25339",
+        "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075"
+      ],
       "explanation_contains": ["config.py", "[commit:"],
       "used_fallback": true
     },
@@ -36,6 +40,10 @@
       "commit_message_contains": ["Simplify _read_from_revision", "Add git tools"],
       "pr_numbers": [],
       "issue_numbers": [],
+      "expected_commit_shas": [
+        "e0f2b80dc00ffa2b5bf063c64f490fe3e53b183e",
+        "50c52bb5e27dc43b87676facc2338d8c0506aa5c"
+      ],
       "explanation_contains": ["file_context_reader.py", "[commit:"],
       "used_fallback": true
     },
@@ -57,6 +65,10 @@
       "commit_message_contains": ["Fix line range slicing"],
       "pr_numbers": [],
       "issue_numbers": [],
+      "expected_commit_shas": [
+        "ceb921c30e1440061de2f23ddb4f526db74be57b",
+        "50c52bb5e27dc43b87676facc2338d8c0506aa5c"
+      ],
       "explanation_contains": ["file_context_reader.py", "[commit:"],
       "used_fallback": true
     },
@@ -78,6 +90,9 @@
       "commit_message_contains": ["Add GitHub issue and PR lookup"],
       "pr_numbers": [],
       "issue_numbers": [],
+      "expected_commit_shas": [
+        "186e6da48c9cf874b954bf24d783f1f6bee868d5"
+      ],
       "explanation_contains": ["github_issue_lookup.py", "[commit:"],
       "used_fallback": true
     },
@@ -99,6 +114,9 @@
       "commit_message_contains": ["initial mockup"],
       "pr_numbers": [1],
       "issue_numbers": [],
+      "expected_commit_shas": [
+        "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075"
+      ],
       "explanation_contains": ["guardrails.py", "[commit:"],
       "used_fallback": true
     },
@@ -120,6 +138,9 @@
       "commit_message_contains": ["Add GitHub issue"],
       "pr_numbers": [],
       "issue_numbers": [],
+      "expected_commit_shas": [
+        "186e6da48c9cf874b954bf24d783f1f6bee868d5"
+      ],
       "explanation_contains": ["github_issue_lookup.py"],
       "used_fallback": true
     },
@@ -141,6 +162,10 @@
       "commit_message_contains": ["initial mockup"],
       "pr_numbers": [1],
       "issue_numbers": [],
+      "expected_commit_shas": [
+        "df17b4f23410af49d10a0f563671216d32b8d4c3",
+        "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075"
+      ],
       "explanation_contains": ["orchestrator.py"],
       "used_fallback": false
     },
@@ -152,6 +177,7 @@
     "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
     "owner": null,
     "repo_name": null,
+    "enforce_public_repo": false,
     "file_path": "git_explainer/tools/file_context_reader.py",
     "start_line": 7,
     "end_line": 14,
@@ -193,6 +219,7 @@
     "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
     "owner": null,
     "repo_name": null,
+    "enforce_public_repo": false,
     "file_path": "git_explainer/orchestrator.py",
     "start_line": 56,
     "end_line": 58,
@@ -208,6 +235,30 @@
     "tags": ["abstention", "no-metadata", "fallback"]
   },
   {
+    "id": "abstention-gitignore-init-commit",
+    "description": "Early .gitignore lines added in an init commit with no associated PR and no issue references — tests sparse-metadata abstention with owner/repo present",
+    "repo_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "file_path": ".gitignore",
+    "start_line": 1,
+    "end_line": 3,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["Add project root files"],
+      "expects_no_pull_requests": true,
+      "expects_no_issues": true,
+      "expected_commit_shas": [
+        "eb50ffd5372dcb90a5f063dbf7c7351a238d111d"
+      ],
+      "explanation_contains": [".gitignore", "No linked pull request"],
+      "used_fallback": true
+    },
+    "tags": ["abstention", "sparse-metadata", "fallback", "graceful-degradation"]
+  },
+  {
     "id": "flask-init-imports",
     "description": "Flask package __init__.py imports — stable open-source file with deep history",
     "repo_url": "https://github.com/pallets/flask",
@@ -220,9 +271,11 @@
     "use_llm": false,
     "expected": {
       "min_commits": 1,
-      "commit_message_contains": [],
-      "pr_numbers": [],
-      "issue_numbers": [],
+      "pr_numbers": [5127, 4682, 4042, 3554, 3292],
+      "issue_numbers": [4020, 4024, 4040, 3288],
+      "expected_commit_shas": [
+        "0ec7f713d679ceed2c605e62ac5d38d579f29fa0"
+      ],
       "explanation_contains": ["__init__.py"],
       "used_fallback": true
     },
@@ -241,8 +294,11 @@
     "use_llm": false,
     "expected": {
       "min_commits": 1,
-      "pr_numbers": [],
-      "issue_numbers": [],
+      "pr_numbers": [3429, 991, 953, 786, 604],
+      "issue_numbers": [3427, 888, 583],
+      "expected_commit_shas": [
+        "15a3869006fa68d7ad34bc315842f2ca5b537311"
+      ],
       "explanation_contains": ["api.py"],
       "used_fallback": true
     },
@@ -414,11 +470,152 @@
     "use_llm": false,
     "expected": {
       "min_commits": 1,
-      "pr_numbers": [],
-      "issue_numbers": [],
+      "pr_numbers": [7190, 5856, 4067, 3429, 1854],
+      "issue_numbers": [7190, 5794, 5856, 3427],
+      "expected_commit_shas": [
+        "f8bec2f7ca9d7c03981a12ff8866a9b3923f1699"
+      ],
       "explanation_contains": ["exceptions.py"],
       "used_fallback": true
     },
     "tags": ["external-repo", "fallback", "multi-commit"]
+  },
+  {
+    "id": "react-use-optimistic-hook",
+    "description": "useOptimistic hook export in React — stable block with a clean originating PR (#31757, remove enableAsyncActions flag)",
+    "repo_url": "https://github.com/facebook/react",
+    "owner": "facebook",
+    "repo_name": "react",
+    "file_path": "packages/react/src/ReactHooks.js",
+    "start_line": 226,
+    "end_line": 232,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["Remove enableAsyncActions"],
+      "pr_numbers": [31757],
+      "expected_commit_shas": [
+        "ef63718a27407b6d6b262d6be92e6bf0a87ff1a3"
+      ],
+      "explanation_contains": ["ReactHooks.js"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "react"]
+  },
+  {
+    "id": "react-start-transition-noop-import",
+    "description": "Shared noop import added to ReactStartTransition.js — single-commit change tied to PR #33154",
+    "repo_url": "https://github.com/facebook/react",
+    "owner": "facebook",
+    "repo_name": "react",
+    "file_path": "packages/react/src/ReactStartTransition.js",
+    "start_line": 27,
+    "end_line": 28,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["shared noop"],
+      "pr_numbers": [33154],
+      "expected_commit_shas": [
+        "21fdf308a1a01af69c28c00a70086aa1bd4c2411"
+      ],
+      "explanation_contains": ["ReactStartTransition.js"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "react", "single-commit"]
+  },
+  {
+    "id": "react-taint-binary-flight-removal",
+    "description": "Typed-array/DataView taint check after removing enableBinaryFlight flag — traces cleanly to PR #31759",
+    "repo_url": "https://github.com/facebook/react",
+    "owner": "facebook",
+    "repo_name": "react",
+    "file_path": "packages/react/src/ReactTaint.js",
+    "start_line": 78,
+    "end_line": 82,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["enableBinaryflight"],
+      "pr_numbers": [31759],
+      "expected_commit_shas": [
+        "08dfd0b8053d8d712607d3f37ddbb4da00c351f1"
+      ],
+      "explanation_contains": ["ReactTaint.js"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "react", "single-commit"]
+  },
+  {
+    "id": "cpython-stdev-infinite-check",
+    "description": "stdev() guard against infinite inputs — block added in CPython PR #141531 (gh-140938)",
+    "repo_url": "https://github.com/python/cpython",
+    "owner": "python",
+    "repo_name": "cpython",
+    "file_path": "Lib/statistics.py",
+    "start_line": 622,
+    "end_line": 628,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["infinite inputs to stdev"],
+      "pr_numbers": [141531],
+      "expected_commit_shas": [
+        "f0a8bc737ab2f04d4196eee154cb1e17e26ad585"
+      ],
+      "explanation_contains": ["statistics.py"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "cpython", "single-commit"]
+  },
+  {
+    "id": "cpython-fmean-speedup",
+    "description": "fmean() iterator-counting path sped up with itertools.compress — PR gh-148875",
+    "repo_url": "https://github.com/python/cpython",
+    "owner": "python",
+    "repo_name": "cpython",
+    "file_path": "Lib/statistics.py",
+    "start_line": 195,
+    "end_line": 199,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["Speed up counting", "fmean"],
+      "pr_numbers": [148875],
+      "expected_commit_shas": [
+        "fbc7676df6256071682f4179818b74ba29f162cd"
+      ],
+      "explanation_contains": ["statistics.py"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "cpython", "single-commit"]
+  },
+  {
+    "id": "cpython-json-array-hook",
+    "description": "array_hook parameter documentation in json.load() — CPython PR #146441 (gh-146440)",
+    "repo_url": "https://github.com/python/cpython",
+    "owner": "python",
+    "repo_name": "cpython",
+    "file_path": "Lib/json/__init__.py",
+    "start_line": 295,
+    "end_line": 299,
+    "max_commits": 5,
+    "use_llm": false,
+    "expected": {
+      "min_commits": 1,
+      "commit_message_contains": ["array_hook"],
+      "pr_numbers": [146441],
+      "expected_commit_shas": [
+        "d0061d50b0f94f42650404352eb10e007c826100"
+      ],
+      "explanation_contains": ["__init__.py"],
+      "used_fallback": true
+    },
+    "tags": ["external-repo", "fallback", "cpython", "single-commit"]
   }
 ]
