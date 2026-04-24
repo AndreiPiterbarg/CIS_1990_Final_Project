@@ -260,6 +260,63 @@ class TestScoreCase:
         assert score.checks["commit_message_contains"] is True
         assert score.passed is True
 
+    def test_empty_commit_message_targets_are_skipped(self):
+        case = _make_case(expected={"commit_message_contains": []})
+        result = _make_result()
+
+        score = score_case(case, result, elapsed=0.1)
+
+        assert "commit_message_contains" not in score.checks
+        assert score.passed is True
+
+    def test_empty_pr_numbers_requires_no_pull_requests(self):
+        case = _make_case(expected={"pr_numbers": []})
+        result = _make_result(pull_requests=[{"number": 42, "title": "Unexpected PR"}])
+
+        score = score_case(case, result, elapsed=0.2)
+
+        assert score.checks["pr_numbers"] is False
+        assert score.passed is False
+
+    def test_empty_issue_numbers_requires_no_issues(self):
+        case = _make_case(expected={"issue_numbers": []})
+        result = _make_result(issues=[{"number": 7, "title": "Unexpected issue"}])
+
+        score = score_case(case, result, elapsed=0.2)
+
+        assert score.checks["issue_numbers"] is False
+        assert score.passed is False
+
+    def test_explicit_no_pull_requests_overrides_pr_numbers(self):
+        case = _make_case(
+            expected={
+                "expects_no_pull_requests": True,
+                "pr_numbers": [42],
+            }
+        )
+        result = _make_result(pull_requests=[])
+
+        score = score_case(case, result, elapsed=0.2)
+
+        assert "pr_numbers" not in score.checks
+        assert score.checks["expects_no_pull_requests"] is True
+        assert score.passed is True
+
+    def test_explicit_no_issues_overrides_issue_numbers(self):
+        case = _make_case(
+            expected={
+                "expects_no_issues": True,
+                "issue_numbers": [7],
+            }
+        )
+        result = _make_result(issues=[])
+
+        score = score_case(case, result, elapsed=0.2)
+
+        assert "issue_numbers" not in score.checks
+        assert score.checks["expects_no_issues"] is True
+        assert score.passed is True
+
     def test_no_expected_fields(self):
         case = _make_case(expected={})
         result = _make_result()
@@ -455,7 +512,13 @@ class TestSummaries:
         summary = summarize_scores(cases, scores, total_elapsed=4.0)
 
         assert summary["benchmark"] == {"case_count": 2, "repo_count": 1}
-        assert summary["counts"] == {"passed": 1, "failed": 1, "errors": 0, "total": 2}
+        assert summary["counts"] == {
+            "passed": 1,
+            "failed": 1,
+            "errors": 0,
+            "skipped": 0,
+            "total": 2,
+        }
         assert summary["pass_rate"] == 0.5
         assert summary["retrieval"]["accuracy"] == 0.75
         assert summary["citation"]["coverage"] == 0.8
@@ -464,6 +527,43 @@ class TestSummaries:
         assert summary["latency"]["average_seconds"] == 2.0
         assert summary["latency"]["p50_seconds"] == 2.0
         assert summary["latency"]["p95_seconds"] == pytest.approx(2.9, abs=0.001)
+
+    def test_skipped_scores_excluded_from_pass_rate_and_aggregates(self):
+        cases = [_make_case(id="c1"), _make_case(id="c2", use_llm=True)]
+        scores = [
+            CaseScore(
+                case_id="c1",
+                passed=True,
+                checks={"min_commits": True},
+                elapsed_seconds=1.0,
+                metrics={
+                    "retrieval_matched_count": 2,
+                    "retrieval_target_count": 2,
+                },
+            ),
+            CaseScore(
+                case_id="c2",
+                passed=False,
+                checks={},
+                elapsed_seconds=0.0,
+                skipped=True,
+                skip_reason="use_llm=true case skipped under --no-llm",
+            ),
+        ]
+
+        summary = summarize_scores(cases, scores, total_elapsed=1.0)
+
+        assert summary["counts"] == {
+            "passed": 1,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 1,
+            "total": 2,
+        }
+        assert summary["pass_rate"] == 1.0
+        assert summary["retrieval"]["matched_count"] == 2
+        assert summary["retrieval"]["target_count"] == 2
+        assert summary["latency"]["average_seconds"] == 1.0
 
     def test_save_results_writes_summary_and_cases(self, tmp_path):
         results_file = tmp_path / "results.json"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,10 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from git_explainer.orchestrator import ExplanationResult, explain_code_history
 
@@ -68,6 +73,8 @@ class CaseScore:
     elapsed_seconds: float
     error: str | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
+    skipped: bool = False
+    skip_reason: str | None = None
 
 
 _CITATION_TOKEN_RE = re.compile(
@@ -91,25 +98,87 @@ def load_benchmark(path: Path) -> list[BenchmarkCase]:
     return [BenchmarkCase.from_dict(case) for case in data]
 
 
+def _canonicalize_repo_ref(repo_ref: str) -> str:
+    """Normalize repo URLs so local-project aliases compare consistently."""
+    normalized = repo_ref.strip().rstrip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+    if normalized.startswith("git@github.com:"):
+        normalized = "https://github.com/" + normalized.split(":", 1)[1]
+    return normalized.lower()
+
+
+def _current_repo_aliases() -> set[str]:
+    """Return identifiers that should be treated as aliases for the cwd repo."""
+    cwd = Path.cwd().resolve()
+    aliases = {str(cwd).lower()}
+    try:
+        remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError:
+        return aliases
+
+    if remote:
+        aliases.add(_canonicalize_repo_ref(remote))
+    return aliases
+
+
 def _is_local_repo(repo_url: str) -> bool:
     """Return True if the repo_url points to the current project."""
     cwd = Path.cwd().resolve()
     try:
         candidate = Path(repo_url).resolve()
-        return candidate == cwd
+        if candidate == cwd:
+            return True
     except (OSError, ValueError):
-        return False
+        pass
+    return _canonicalize_repo_ref(repo_url) in _current_repo_aliases()
+
+
+def _requires_local_no_origin_copy(case: BenchmarkCase) -> bool:
+    """Use an isolated local copy when owner/repo are omitted for the cwd repo."""
+    return case.owner is None and case.repo_name is None and _is_local_repo(case.repo_url)
+
+
+def _repo_cache_key(case: BenchmarkCase) -> str:
+    """Cache key for repo setup, including local no-origin copies when needed."""
+    if _requires_local_no_origin_copy(case):
+        return f"{_canonicalize_repo_ref(case.repo_url)}::no-origin"
+    return case.repo_url
+
+
+def _make_local_repo_copy_without_origin(source: Path) -> str:
+    """Copy the cwd repo so owner-less cases cannot infer GitHub metadata from origin."""
+    dest = Path(tempfile.mkdtemp(prefix="eval_repo_"))
+    shutil.copytree(source, dest, dirs_exist_ok=True)
+    subprocess.run(
+        ["git", "remote", "remove", "origin"],
+        cwd=dest,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return str(dest)
 
 
 def setup_repos(cases: list[BenchmarkCase]) -> dict[str, str]:
-    """Clone (or reuse) repos for all unique repo_urls. Returns url -> local path."""
+    """Clone (or reuse) repos for benchmark cases. Returns repo-key -> local path."""
     repo_map: dict[str, str] = {}
     for case in cases:
+        key = _repo_cache_key(case)
+        if key in repo_map:
+            continue
         url = case.repo_url
-        if url in repo_map:
+        if _requires_local_no_origin_copy(case):
+            repo_map[key] = _make_local_repo_copy_without_origin(Path.cwd())
             continue
         if _is_local_repo(url):
-            repo_map[url] = str(Path.cwd())
+            repo_map[key] = str(Path.cwd())
         else:
             dest = tempfile.mkdtemp(prefix="eval_repo_")
             try:
@@ -119,10 +188,10 @@ def setup_repos(cases: list[BenchmarkCase]) -> dict[str, str]:
                     capture_output=True,
                     text=True,
                 )
-                repo_map[url] = dest
+                repo_map[key] = dest
             except subprocess.CalledProcessError as exc:
                 print(f"WARNING: Failed to clone {url}: {exc.stderr.strip()}")
-                repo_map[url] = ""  # empty string signals clone failure
+                repo_map[key] = ""  # empty string signals clone failure
     return repo_map
 
 
@@ -171,19 +240,37 @@ def score_case(case: BenchmarkCase, result: ExplanationResult, elapsed: float) -
         checks["max_commits"] = len(result["commits"]) <= expected["max_commits"]
 
     if "commit_message_contains" in expected:
-        messages = [c["message"].lower() for c in result["commits"]]
-        checks["commit_message_contains"] = all(
-            any(kw.lower() in msg for msg in messages)
-            for kw in expected["commit_message_contains"]
-        )
+        commit_message_targets = expected["commit_message_contains"]
+        if commit_message_targets:
+            messages = [c["message"].lower() for c in result["commits"]]
+            checks["commit_message_contains"] = all(
+                any(kw.lower() in msg for msg in messages)
+                for kw in commit_message_targets
+            )
+        # Empty commit-message target lists are treated as intentionally vacuous
+        # and skipped so they do not show up as misleading "passed" checks.
 
-    if "pr_numbers" in expected:
-        found_prs = {pr["number"] for pr in result["pull_requests"]}
-        checks["pr_numbers"] = all(n in found_prs for n in expected["pr_numbers"])
+    if "expects_no_pull_requests" in expected:
+        expects_none = bool(expected["expects_no_pull_requests"])
+        checks["expects_no_pull_requests"] = (len(result["pull_requests"]) == 0) == expects_none
+    elif "pr_numbers" in expected:
+        expected_pr_numbers = expected["pr_numbers"]
+        if expected_pr_numbers == []:
+            checks["pr_numbers"] = len(result["pull_requests"]) == 0
+        else:
+            found_prs = {pr["number"] for pr in result["pull_requests"]}
+            checks["pr_numbers"] = all(n in found_prs for n in expected_pr_numbers)
 
-    if "issue_numbers" in expected:
-        found_issues = {issue["number"] for issue in result["issues"]}
-        checks["issue_numbers"] = all(n in found_issues for n in expected["issue_numbers"])
+    if "expects_no_issues" in expected:
+        expects_none = bool(expected["expects_no_issues"])
+        checks["expects_no_issues"] = (len(result["issues"]) == 0) == expects_none
+    elif "issue_numbers" in expected:
+        expected_issue_numbers = expected["issue_numbers"]
+        if expected_issue_numbers == []:
+            checks["issue_numbers"] = len(result["issues"]) == 0
+        else:
+            found_issues = {issue["number"] for issue in result["issues"]}
+            checks["issue_numbers"] = all(n in found_issues for n in expected_issue_numbers)
 
     if "explanation_contains" in expected:
         sections = result["explanation"]
@@ -536,6 +623,7 @@ def summarize_scores(
     passed_count = 0
     failed_count = 0
     error_count = 0
+    skipped_count = 0
 
     retrieval_matched = 0
     retrieval_targets = 0
@@ -544,9 +632,12 @@ def summarize_scores(
     valid_citations = 0
     total_citations = 0
     faithfulness_scores: list[float] = []
-    latencies = [score.elapsed_seconds for score in scores]
+    latencies = [score.elapsed_seconds for score in scores if not score.skipped]
 
     for score in scores:
+        if score.skipped:
+            skipped_count += 1
+            continue
         if score.error:
             error_count += 1
             continue
@@ -567,7 +658,8 @@ def summarize_scores(
             faithfulness_scores.append(float(faithfulness))
 
     total = len(scores)
-    pass_rate = _safe_ratio(passed_count, total)
+    ran_total = passed_count + failed_count + error_count
+    pass_rate = _safe_ratio(passed_count, ran_total)
     average_latency = round(sum(latencies) / len(latencies), 3) if latencies else None
     average_faithfulness = (
         round(sum(faithfulness_scores) / len(faithfulness_scores), 3)
@@ -584,6 +676,7 @@ def summarize_scores(
             "passed": passed_count,
             "failed": failed_count,
             "errors": error_count,
+            "skipped": skipped_count,
             "total": total,
         },
         "pass_rate": pass_rate,
@@ -632,7 +725,9 @@ def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
     print()
 
     for s in scores:
-        if s.error:
+        if s.skipped:
+            print(f"SKIPPED {s.case_id}  ({s.skip_reason or 'skipped'})")
+        elif s.error:
             print(f"ERROR   {s.case_id}  ({s.elapsed_seconds:.1f}s)  {s.error}")
         elif s.passed:
             num_checks = len(s.checks)
@@ -642,10 +737,12 @@ def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
             print(f"FAILED  {s.case_id}  ({s.elapsed_seconds:.1f}s)  [{', '.join(failed_checks)}]")
 
     print()
+    skipped_count = counts.get("skipped", 0)
+    skipped_suffix = f", {skipped_count} skipped" if skipped_count else ""
     print(
         "Summary: "
         f"{counts['passed']} passed, {counts['failed']} failed, "
-        f"{counts['errors']} errors out of {counts['total']} total"
+        f"{counts['errors']} errors{skipped_suffix} out of {counts['total']} total"
     )
     print(f"Pass rate: {(summary['pass_rate'] or 0.0) * 100:.1f}%")
     if retrieval["accuracy"] is None:
@@ -768,8 +865,21 @@ def main(argv: list[str] | None = None) -> None:
     total_start = time.monotonic()
 
     for i, case in enumerate(cases, 1):
+        if args.no_llm and case.use_llm:
+            print(f"[{i}/{len(cases)}] Skipping {case.id} (use_llm=true under --no-llm)")
+            scores.append(
+                CaseScore(
+                    case_id=case.id,
+                    passed=False,
+                    checks={},
+                    elapsed_seconds=0.0,
+                    skipped=True,
+                    skip_reason="use_llm=true case skipped under --no-llm",
+                )
+            )
+            continue
         print(f"[{i}/{len(cases)}] Running {case.id}...")
-        repo_path = repo_map.get(case.repo_url, "")
+        repo_path = repo_map.get(_repo_cache_key(case), "")
         score = run_case(case, repo_path, no_llm=args.no_llm)
         scores.append(score)
 
