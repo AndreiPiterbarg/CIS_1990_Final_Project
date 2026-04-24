@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from git_explainer import config
 from git_explainer.guardrails import ExplainerQuery
 from git_explainer.orchestrator import GitExplainerAgent
 from git_explainer.tools.question_resolver import ResolvedCodeSpan
@@ -242,3 +243,82 @@ def test_agent_rejects_uncited_llm_output_and_uses_fallback(
     assert mock_chat.call_count == 2
     assert "[commit:abc1234]" in result["explanation"]["what_changed"]
     assert "[pr:#42]" in result["explanation"]["why"]
+
+
+@patch("git_explainer.orchestrator.chat")
+@patch("git_explainer.orchestrator.is_available")
+@patch("git_explainer.orchestrator.get_diff")
+@patch("git_explainer.orchestrator.read_file_at_revision")
+@patch("git_explainer.orchestrator.fetch_pr_comments")
+@patch("git_explainer.orchestrator.fetch_pr")
+@patch("git_explainer.orchestrator.find_prs_for_commit")
+@patch("git_explainer.orchestrator.trace_line_history")
+@patch("git_explainer.orchestrator.validate_query")
+def test_orchestrator_condenses_long_evidence_before_synthesis(
+    mock_validate,
+    mock_trace,
+    mock_find_prs,
+    mock_fetch_pr,
+    mock_fetch_pr_comments,
+    mock_read_file,
+    mock_get_diff,
+    mock_is_available,
+    mock_chat,
+    tmp_path,
+):
+    """Long PR body must be pre-summarized in the synthesis prompt but
+    returned un-condensed in the ExplanationResult."""
+    query = _make_query(tmp_path)
+    mock_validate.return_value = query
+    mock_trace.return_value = [
+        {"sha": "abc1234", "full_sha": "abc123456789", "author": "Alice", "date": "2024-06-01", "message": "Fix parser"},
+    ]
+    mock_find_prs.return_value = [42]
+
+    # A genuinely huge PR body so condensation triggers even with the default
+    # budget (30k). Cap it modestly to keep tests fast.
+    long_pr_body = "start of body. " + ("filler filler filler " * 3000) + " end."
+    mock_fetch_pr.return_value = {
+        "number": 42,
+        "title": "Improve parser",
+        "body": long_pr_body,
+        "state": "merged",
+    }
+    mock_fetch_pr_comments.return_value = []
+    mock_read_file.return_value = "ctx"
+    mock_get_diff.return_value = {"files": []}
+
+    # Synthesis LLM is available and returns a valid cited JSON.
+    mock_is_available.return_value = True
+    mock_chat.return_value = json.dumps({
+        "what_changed": "Parser changed [commit:abc1234].",
+        "why": "See [pr:#42].",
+        "tradeoffs": "Minor [commit:abc1234].",
+        "limitations": "Limited to retrieved evidence [commit:abc1234].",
+        "summary": "Summary [commit:abc1234].",
+    })
+
+    # Run with a tiny budget so condensation definitely triggers without
+    # needing a 30k body. The condenser itself uses the LLM path when the
+    # synthesis LLM is available, so we also stub its chat call via the
+    # evidence_condenser module.
+    with patch.object(config, "EVIDENCE_CHAR_BUDGET", 2000), \
+         patch.object(config, "EVIDENCE_FIELD_MAX_CHARS", 1000), \
+         patch("git_explainer.evidence_condenser.llm.is_available", return_value=False):
+        result = GitExplainerAgent(use_llm=True).explain(query)
+
+    # The ExplanationResult contains the ORIGINAL PR body.
+    assert result["pull_requests"][0]["body"] == long_pr_body
+
+    # The condensation report was populated.
+    assert result["condensation"] is not None
+    assert result["condensation"]["method_used"] == "heuristic"
+    assert result["condensation"]["original_size"] > result["condensation"]["condensed_size"]
+    assert any("pr#42.body" in f for f in result["condensation"]["fields_condensed"])
+
+    # The synthesis prompt that went to the model saw the CONDENSED body.
+    assert mock_chat.call_count >= 1
+    synthesis_prompt = mock_chat.call_args_list[0].args[0]
+    assert "[truncated]" in synthesis_prompt
+    # And the full, massive body should NOT appear verbatim in the prompt.
+    assert long_pr_body not in synthesis_prompt

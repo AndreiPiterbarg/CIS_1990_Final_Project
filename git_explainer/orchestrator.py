@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from git_explainer.evidence_condenser import CondensationReport, condense_evidence
 from git_explainer.guardrails import (
     ExplainerQuery,
     should_fetch_file_context,
@@ -40,7 +41,7 @@ class ExplanationSections(TypedDict):
     summary: str
 
 
-class ExplanationResult(TypedDict):
+class ExplanationResult(TypedDict, total=False):
     query: dict[str, Any]
     resolved_target: dict[str, Any] | None
     explanation: ExplanationSections
@@ -51,6 +52,12 @@ class ExplanationResult(TypedDict):
     diffs: list[dict[str, Any]]
     cache_stats: dict[str, int]
     used_fallback: bool
+    # Optional: report describing any pre-synthesis evidence condensation.
+    # Present only when the synthesis path ran (so the caller can tell
+    # whether long PR/issue threads were summarized or truncated before
+    # being fed to the LLM). The ExplanationResult's own PR/issue/diff
+    # fields still contain the ORIGINAL, un-condensed data.
+    condensation: dict[str, Any] | None
 
 
 class CitationCoverageError(ValueError):
@@ -119,7 +126,12 @@ class GitExplainerAgent:
             "file_contexts": contexts,
             "diffs": diffs,
         }
-        explanation, used_fallback = self._synthesize(normalized, evidence)
+        # Pre-summarize long-form fields so the synthesis prompt stays within
+        # the model's context window. The caller still sees the original
+        # evidence in the returned result -- only the synthesis LLM reads
+        # the condensed view.
+        condensed_evidence, condensation_report = condense_evidence(evidence)
+        explanation, used_fallback = self._synthesize(normalized, condensed_evidence)
         memory.flush()
 
         return ExplanationResult(
@@ -133,6 +145,7 @@ class GitExplainerAgent:
             diffs=diffs,
             cache_stats=memory.stats(),
             used_fallback=used_fallback,
+            condensation=condensation_report.to_dict(),
         )
 
     def _collect_evidence(
@@ -153,7 +166,9 @@ class GitExplainerAgent:
             pr_numbers = memory.get_commit_prs(lookup_sha)
             if pr_numbers is None:
                 if query.owner and query.repo_name:
-                    pr_numbers = find_prs_for_commit(query.owner, query.repo_name, lookup_sha)
+                    pr_numbers = find_prs_for_commit(
+                        query.owner, query.repo_name, lookup_sha, memory=memory
+                    )
                 else:
                     pr_numbers = []
                 memory.set_commit_prs(lookup_sha, pr_numbers)
@@ -171,7 +186,9 @@ class GitExplainerAgent:
                 pr_data = memory.get_pr(pr_number)
                 if pr_data is None:
                     if query.owner and query.repo_name:
-                        pr_data = fetch_pr(query.owner, query.repo_name, pr_number)
+                        pr_data = fetch_pr(
+                            query.owner, query.repo_name, pr_number, memory=memory
+                        )
                     if pr_data is None:
                         continue
                     memory.set_pr(pr_number, pr_data)
@@ -179,7 +196,9 @@ class GitExplainerAgent:
                 comments = memory.get_pr_comments(pr_number)
                 if comments is None:
                     if query.owner and query.repo_name:
-                        comments = fetch_pr_comments(query.owner, query.repo_name, pr_number)
+                        comments = fetch_pr_comments(
+                            query.owner, query.repo_name, pr_number, memory=memory
+                        )
                     else:
                         comments = []
                     memory.set_pr_comments(pr_number, comments)
@@ -236,14 +255,18 @@ class GitExplainerAgent:
                     continue
                 issue_data = memory.get_issue(issue_number)
                 if issue_data is None:
-                    issue_data = fetch_issue(query.owner, query.repo_name, issue_number)
+                    issue_data = fetch_issue(
+                        query.owner, query.repo_name, issue_number, memory=memory
+                    )
                     if issue_data is None:
                         continue
                     memory.set_issue(issue_number, issue_data)
 
                 comments = memory.get_issue_comments(issue_number)
                 if comments is None:
-                    comments = fetch_issue_comments(query.owner, query.repo_name, issue_number)
+                    comments = fetch_issue_comments(
+                        query.owner, query.repo_name, issue_number, memory=memory
+                    )
                     memory.set_issue_comments(issue_number, comments)
 
                 issue_record = dict(issue_data)
@@ -475,7 +498,7 @@ def explain_code_history(
     repo_name: str | None = None,
     max_commits: int = 5,
     context_radius: int = 30,
-    enforce_public_repo: bool = False,
+    enforce_public_repo: bool = True,
     use_llm: bool = True,
 ) -> ExplanationResult:
     """Convenience wrapper around :class:`GitExplainerAgent`."""
