@@ -32,7 +32,7 @@ class ExplainerQuery:
     repo_name: str | None = None
     max_commits: int = config.DEFAULT_MAX_COMMITS
     context_radius: int = config.DEFAULT_CONTEXT_RADIUS
-    enforce_public_repo: bool = False
+    enforce_public_repo: bool = True
 
     def to_dict(self) -> dict[str, str | int | bool | None]:
         return asdict(self)

@@ -32,10 +32,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lines of surrounding code to fetch when extra context is needed",
     )
     parser.add_argument(
-        "--enforce-public-repo",
-        action="store_true",
-        help="Refuse private or missing GitHub repositories",
+        "--allow-private-repo",
+        dest="enforce_public_repo",
+        action="store_false",
+        help=(
+            "Opt out of the default public-repo guardrail so private or "
+            "unreachable GitHub repositories are accepted. The public-repo "
+            "check is now on by default."
+        ),
     )
+    parser.set_defaults(enforce_public_repo=True)
     parser.add_argument(
         "--no-llm",
         action="store_true",

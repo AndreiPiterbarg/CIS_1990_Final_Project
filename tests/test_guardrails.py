@@ -50,6 +50,7 @@ def test_validate_query_infers_owner_and_repo(mock_git, tmp_path):
             file_path="./src/app.py",
             start_line=2,
             end_line=4,
+            enforce_public_repo=False,
         )
     )
 
@@ -79,6 +80,7 @@ def test_validate_query_accepts_question_mode(tmp_path):
         ExplainerQuery(
             repo_path=str(repo),
             question="Why does this code fetch surrounding file context?",
+            enforce_public_repo=False,
         )
     )
 
@@ -96,6 +98,7 @@ def test_validate_query_accepts_question_with_file_hint(tmp_path):
             repo_path=str(repo),
             file_path="./src/app.py",
             question="Why does this file exist?",
+            enforce_public_repo=False,
         )
     )
 
@@ -124,3 +127,53 @@ def test_should_fetch_file_context_for_generic_message():
         "Add structured PR evidence gathering",
         pr_body="This PR explains the motivation in detail and links the rollout plan.",
     )
+
+
+def test_enforce_public_repo_defaults_to_true():
+    """The dataclass default must be True so the public-repo guardrail is
+    on by default. Regression guard for the default flip."""
+    query = ExplainerQuery(repo_path="/tmp/fake")
+    assert query.enforce_public_repo is True
+
+
+@patch("git_explainer.guardrails.ensure_public_github_repo")
+def test_validate_query_calls_ensure_public_github_repo_by_default(
+    mock_ensure, tmp_path
+):
+    """With the new default, a line-range query with owner/repo set should
+    invoke the public-repo guardrail."""
+    repo = _make_repo(tmp_path)
+    mock_ensure.return_value = {"private": False}
+
+    validate_query(
+        ExplainerQuery(
+            repo_path=str(repo),
+            file_path="src/app.py",
+            start_line=1,
+            end_line=2,
+            owner="octocat",
+            repo_name="hello",
+        )
+    )
+
+    mock_ensure.assert_called_once_with("octocat", "hello")
+
+
+@patch("git_explainer.guardrails.ensure_public_github_repo")
+def test_validate_query_skips_public_check_when_opted_out(mock_ensure, tmp_path):
+    """Passing ``enforce_public_repo=False`` must skip the guardrail."""
+    repo = _make_repo(tmp_path)
+
+    validate_query(
+        ExplainerQuery(
+            repo_path=str(repo),
+            file_path="src/app.py",
+            start_line=1,
+            end_line=2,
+            owner="octocat",
+            repo_name="hello",
+            enforce_public_repo=False,
+        )
+    )
+
+    mock_ensure.assert_not_called()
