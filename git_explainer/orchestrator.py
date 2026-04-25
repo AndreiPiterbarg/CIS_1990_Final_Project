@@ -52,6 +52,12 @@ class ExplanationResult(TypedDict, total=False):
     diffs: list[dict[str, Any]]
     cache_stats: dict[str, int]
     used_fallback: bool
+    # When ``used_fallback`` is True, this names *why*: ``"llm_disabled"``,
+    # ``"llm_error"`` (transient API failure -- not the agent's fault),
+    # or ``"validation_failed"`` (LLM responded but its output did not
+    # parse / citation-cover after retry). Tooling that needs to tell a
+    # transient upstream outage from a deterministic agent path uses this.
+    fallback_reason: str | None
     # Optional: report describing any pre-synthesis evidence condensation.
     # Present only when the synthesis path ran (so the caller can tell
     # whether long PR/issue threads were summarized or truncated before
@@ -131,7 +137,9 @@ class GitExplainerAgent:
         # evidence in the returned result -- only the synthesis LLM reads
         # the condensed view.
         condensed_evidence, condensation_report = condense_evidence(evidence)
-        explanation, used_fallback = self._synthesize(normalized, condensed_evidence)
+        explanation, used_fallback, fallback_reason = self._synthesize(
+            normalized, condensed_evidence
+        )
         memory.flush()
 
         return ExplanationResult(
@@ -145,6 +153,7 @@ class GitExplainerAgent:
             diffs=diffs,
             cache_stats=memory.stats(),
             used_fallback=used_fallback,
+            fallback_reason=fallback_reason,
             condensation=condensation_report.to_dict(),
         )
 
@@ -253,6 +262,17 @@ class GitExplainerAgent:
             for issue_number in sorted(commit_issue_refs):
                 if issue_number in seen_issues or not query.owner or not query.repo_name:
                     continue
+                # Skip numbers we have already collected as pull requests:
+                # GitHub's issues API returns PRs (PRs are a subtype of
+                # issues). fetch_issue filters them on a fresh call, but
+                # a previously-cached entry from before that filter was
+                # added would still appear here -- and on any repo where
+                # a commit message references its own PR by number, a
+                # naive flow lists the same artifact in both pull_requests
+                # and issues. This dedup is the orchestrator-level safety
+                # net.
+                if issue_number in seen_prs:
+                    continue
                 issue_data = memory.get_issue(issue_number)
                 if issue_data is None:
                     issue_data = fetch_issue(
@@ -282,44 +302,79 @@ class GitExplainerAgent:
         self,
         query: ExplainerQuery,
         evidence: dict[str, Any],
-    ) -> tuple[ExplanationSections, bool]:
-        if self.use_llm and is_available():
-            prompt = build_synthesis_prompt(query.to_dict(), evidence)
-            for attempt in range(2):
-                try:
-                    if attempt == 1:
-                        prompt = (
-                            "Your previous response failed validation. "
-                            "Reply ONLY with a JSON object (no markdown fences) "
-                            "containing keys: what_changed, why, tradeoffs, "
-                            "limitations, summary. Every sentence in every "
-                            "section must include at least one bracketed "
-                            "citation like [commit:abc1234], [pr:#42], or "
-                            "[issue:#101].\n\n" + prompt
-                        )
-                    response = chat(
-                        prompt,
-                        system_prompt=SYSTEM_PROMPT,
-                        temperature=0.1,
-                    )
-                    parsed = json.loads(_extract_json(response))
-                    if not self._REQUIRED_KEYS.issubset(parsed.keys()):
-                        continue
-                    normalized = self._normalize_sections(parsed)
-                    _ensure_citation_coverage(normalized)
-                    return normalized, False
-                except (
-                    CitationCoverageError,
-                    LLMUnavailableError,
-                    json.JSONDecodeError,
-                    KeyError,
-                    TypeError,
-                    ValueError,
-                ):
-                    if attempt == 1:
-                        break
+    ) -> tuple[ExplanationSections, bool, str | None]:
+        """Synthesize an explanation, falling back to a deterministic builder on failure.
 
-        return self._fallback_summary(query, evidence), True
+        Returns ``(sections, used_fallback, fallback_reason)``. The reason
+        is one of:
+          - ``None`` -- the LLM produced a valid synthesis (used_fallback is False).
+          - ``"llm_disabled"`` -- ``use_llm`` was False or no key configured.
+          - ``"llm_error"`` -- the LLM call raised (transport, quota, auth,
+            timeout, etc.). This is a transient/environmental signal -- callers
+            and test harnesses can use it to distinguish "the agent worked
+            correctly but the upstream model was unreachable" from "the agent
+            decided to fall back".
+          - ``"validation_failed"`` -- the LLM responded but the response did
+            not pass JSON parsing or citation-coverage validation after retry.
+        """
+        if not self.use_llm or not is_available():
+            return self._fallback_summary(query, evidence), True, "llm_disabled"
+
+        prompt = build_synthesis_prompt(query.to_dict(), evidence)
+        last_failure: str | None = None
+        for attempt in range(2):
+            try:
+                if attempt == 1:
+                    prompt = (
+                        "Your previous response failed validation. "
+                        "Reply ONLY with a JSON object (no markdown fences) "
+                        "containing keys: what_changed, why, tradeoffs, "
+                        "limitations, summary. Every sentence in every "
+                        "section must include at least one bracketed "
+                        "citation like [commit:abc1234], [pr:#42], or "
+                        "[issue:#101].\n\n" + prompt
+                    )
+                response = chat(
+                    prompt,
+                    system_prompt=SYSTEM_PROMPT,
+                    temperature=0.1,
+                )
+                parsed = json.loads(_extract_json(response))
+                if not self._REQUIRED_KEYS.issubset(parsed.keys()):
+                    last_failure = "validation_failed"
+                    continue
+                normalized = self._normalize_sections(parsed)
+                _ensure_citation_coverage(normalized)
+                return normalized, False, None
+            except (
+                CitationCoverageError,
+                json.JSONDecodeError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                # Structured-output validation failures: the LLM responded
+                # but the response was malformed or did not satisfy our
+                # citation policy. We retry once, then fall back deterministically.
+                last_failure = "validation_failed"
+                if attempt == 1:
+                    break
+            except LLMUnavailableError:
+                # The configured LLM cannot be used in this process at all
+                # (no key, no client). Treat as a hard "llm_disabled" so
+                # downstream tooling does not retry.
+                return self._fallback_summary(query, evidence), True, "llm_disabled"
+            except Exception:  # noqa: BLE001 -- transient/transport errors
+                # Anything else from the LLM call layer (rate limits,
+                # network blips, 5xx, timeouts, daily-quota exhausted)
+                # is by definition transient and not the agent's fault.
+                # We fall back to the deterministic summary but record
+                # the cause so callers/harnesses can distinguish a
+                # transient API failure from a logic-driven fallback.
+                last_failure = "llm_error"
+                break
+
+        return self._fallback_summary(query, evidence), True, last_failure or "validation_failed"
 
     def _fallback_summary(
         self,
@@ -363,17 +418,45 @@ class GitExplainerAgent:
                 f"No line-history commits were found for {selection} [commit:none]."
             )
 
+        # A PR/issue is "substantive" when its body has enough content to
+        # actually document intent or design rationale. When every cited
+        # PR and issue has an empty or near-empty body, the available
+        # evidence is just titles -- and saying "the intent WAS X" based
+        # on a title alone over-claims. We weaken the language in that
+        # case so the explanation does not assert intent the evidence
+        # cannot support. See _is_substantive_artifact for the threshold
+        # and rationale.
+        substantive_prs = [pr for pr in pull_requests if _is_substantive_artifact(pr)]
+        substantive_issues = [iss for iss in issues if _is_substantive_artifact(iss)]
         if pull_requests or issues:
             why_parts: list[str] = []
             if pull_requests:
+                if substantive_prs:
+                    pr_lead = "Related pull requests suggest the intent was "
+                else:
+                    pr_lead = (
+                        "The change is associated with the following pull "
+                        "request(s), but their descriptions are empty or "
+                        "too brief to document the rationale, so the "
+                        "intent can only be inferred from titles and "
+                        "commit messages: "
+                    )
                 why_parts.append(
-                    "Related pull requests suggest the intent was "
+                    pr_lead
                     + "; ".join(f"#{pr['number']} ({pr['title']})" for pr in pull_requests[:2])
                     + f" {pr_citations}."
                 )
             if issues:
+                if substantive_issues:
+                    issue_lead = "Linked issues add context from "
+                else:
+                    issue_lead = (
+                        "Linked issue(s) appear in the metadata, but their "
+                        "descriptions are empty or too brief to add rationale "
+                        "beyond the title: "
+                    )
                 why_parts.append(
-                    "Linked issues add context from "
+                    issue_lead
                     + "; ".join(f"#{issue['number']} ({issue['title']})" for issue in issues[:2])
                     + f" {issue_citations}."
                 )
@@ -432,6 +515,28 @@ class GitExplainerAgent:
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)\n```", re.DOTALL)
 _CITATION_RE = re.compile(r"\[(?:commit:(?:[0-9a-f]{7,40}|none)|pr:#\d+|issue:#\d+)\]")
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+_SUBSTANTIVE_BODY_MIN_CHARS = 80
+
+
+def _is_substantive_artifact(artifact: dict[str, Any]) -> bool:
+    """Return True iff a PR or issue body has enough content to document intent.
+
+    The agent's "why" section is built from the cited PRs and issues. When
+    those artifacts have empty or near-empty bodies the only real evidence
+    is the title, and asserting "the intent was <title>" over-claims --
+    titles do not generally explain *why* a change was made. We use this
+    helper to soften the language in that case so the explanation does not
+    assert intent that the evidence cannot support.
+
+    The threshold is intentionally conservative: 80 characters is short
+    enough that any real design discussion clears it, but excludes the
+    common cases (empty body, single-sentence "fixes #123" body, "see
+    description in PR title", etc.).
+    """
+    body = str(artifact.get("body", "") or "").strip()
+    return len(body) >= _SUBSTANTIVE_BODY_MIN_CHARS
 
 
 def _extract_json(text: str) -> str:
