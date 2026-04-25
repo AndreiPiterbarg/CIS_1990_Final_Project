@@ -47,6 +47,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the synthesis model and use the deterministic fallback summary",
     )
+    parser.add_argument(
+        "--planner",
+        dest="use_planner",
+        action="store_true",
+        help=(
+            "Enable the Planner LLM. The planner decides which "
+            "deterministic git/GitHub tools to invoke (and in what "
+            "order) instead of the orchestrator's fixed sequence. "
+            "Implies use_llm; ignored when --no-llm is set."
+        ),
+    )
+    parser.add_argument(
+        "--critic",
+        dest="use_critic",
+        action="store_true",
+        help=(
+            "Enable the Critic LLM. After synthesis, an independent "
+            "model (Claude Haiku 4.5 by default) grades the explanation "
+            "against the gathered evidence and may trigger one re-plan "
+            "+ re-synthesis round. Implies use_llm; ignored when "
+            "--no-llm is set."
+        ),
+    )
     return parser
 
 
@@ -60,6 +83,8 @@ def main() -> None:
     elif args.file_path is None or args.start_line is None or args.end_line is None:
         parser.error("Provide file_path start_line end_line, or use --question")
 
+    use_llm = not args.no_llm
+
     result = explain_code_history(
         args.repo_path,
         args.file_path,
@@ -71,7 +96,9 @@ def main() -> None:
         max_commits=args.max_commits,
         context_radius=args.context_radius,
         enforce_public_repo=args.enforce_public_repo,
-        use_llm=not args.no_llm,
+        use_llm=use_llm,
+        use_planner=use_llm and args.use_planner,
+        use_critic=use_llm and args.use_critic,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 

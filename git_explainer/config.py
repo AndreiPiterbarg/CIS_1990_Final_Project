@@ -47,6 +47,30 @@ EVIDENCE_FIELD_MAX_CHARS = int(os.getenv("EVIDENCE_FIELD_MAX_CHARS", "3000"))
 EVIDENCE_SUMMARY_TARGET_CHARS = int(os.getenv("EVIDENCE_SUMMARY_TARGET_CHARS", "800"))
 
 
+# ---------------------------------------------------------------------------
+# Planner + Critic (agentic LLM layers)
+# ---------------------------------------------------------------------------
+# When the Planner is enabled, an LLM decides which deterministic GitHub /
+# git tools to invoke (and in what order) instead of the orchestrator's
+# fixed sequence. The Critic is an independent LLM that grades the
+# synthesized explanation against the gathered evidence; if it flags gaps
+# the Planner is invoked once more before re-synthesis.
+#
+# Both layers are opt-in: callers must explicitly enable them via the
+# ``GitExplainerAgent`` constructor or the ``--planner`` / ``--critic`` CLI
+# flags. The defaults below only set ceilings, not policy.
+PLANNER_MAX_ITERATIONS = int(os.getenv("PLANNER_MAX_ITERATIONS", "10"))
+PLANNER_MODEL = os.getenv("PLANNER_MODEL", GROQ_MODEL)
+PLANNER_MAX_TOKENS = int(os.getenv("PLANNER_MAX_TOKENS", "1024"))
+
+CRITIC_MAX_ROUNDS = int(os.getenv("CRITIC_MAX_ROUNDS", "1"))
+# We use a Claude family model for the critic so the second LLM in the
+# pipeline is genuinely independent from the synthesis LLM (Groq llama).
+# This mirrors the eval harness's judge_anthropic.py choice.
+CRITIC_MODEL = os.getenv("CRITIC_MODEL", "claude-haiku-4-5")
+CRITIC_MAX_TOKENS = int(os.getenv("CRITIC_MAX_TOKENS", "600"))
+
+
 def github_headers(*, accept: str = "application/vnd.github.v3+json") -> dict[str, str]:
     """Return GitHub headers with the configured token, if any."""
     return {

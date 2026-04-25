@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from git_explainer import critic as critic_mod
+from git_explainer import planner as planner_mod
 from git_explainer.evidence_condenser import CondensationReport, condense_evidence
 from git_explainer.guardrails import (
     ExplainerQuery,
@@ -16,6 +18,7 @@ from git_explainer.guardrails import (
 from git_explainer.llm import LLMUnavailableError, chat, is_available
 from git_explainer.memory import ExplainerMemory
 from git_explainer.prompts import SYSTEM_PROMPT, build_synthesis_prompt
+from git_explainer.tool_registry import ToolCallContext
 from git_explainer.tools.file_context_reader import read_file_at_revision
 from git_explainer.tools.commit_search import search_commits
 from git_explainer.tools.git_blame_trace import trace_line_history
@@ -64,6 +67,16 @@ class ExplanationResult(TypedDict, total=False):
     # being fed to the LLM). The ExplanationResult's own PR/issue/diff
     # fields still contain the ORIGINAL, un-condensed data.
     condensation: dict[str, Any] | None
+    # Optional: audit trail of the Planner LLM's tool-routing decisions.
+    # Present only when the agent was constructed with use_planner=True.
+    # Each entry records iteration, tool name, arguments, status, and a
+    # short result summary so eval / debugging can reconstruct what the
+    # planner chose without re-running it.
+    planner: dict[str, Any] | None
+    # Optional: report from the Critic LLM that graded the synthesized
+    # explanation. Present only when use_critic=True. ``verdict`` is
+    # one of "ok", "needs_more_evidence", or "skipped".
+    critic: dict[str, Any] | None
 
 
 class CitationCoverageError(ValueError):
@@ -75,6 +88,18 @@ class GitExplainerAgent:
     """Coordinate git tracing, GitHub enrichment, caching, and synthesis."""
 
     use_llm: bool = True
+    # When ``use_planner`` is True, an LLM (the Planner) decides which
+    # deterministic git/GitHub tools to invoke after the initial commit
+    # list is seeded by ``trace_line_history``. The fixed-sequence path
+    # below is preserved verbatim and is used as a fallback whenever the
+    # Planner is disabled, unavailable, or errors out -- so the agent
+    # always produces a result.
+    use_planner: bool = False
+    # When ``use_critic`` is True, a second LLM (Anthropic Claude Haiku
+    # by default) grades the synthesized explanation against the
+    # gathered evidence and may trigger one re-planning + re-synthesis
+    # round if it flags gaps.
+    use_critic: bool = False
 
     def explain(self, query: ExplainerQuery) -> ExplanationResult:
         normalized = validate_query(query)
@@ -124,7 +149,23 @@ class GitExplainerAgent:
             except ValueError:
                 commits = []
 
-        pull_requests, issues, contexts, diffs = self._collect_evidence(normalized, commits, memory)
+        # Gather evidence -- via Planner LLM when enabled, otherwise via
+        # the fixed deterministic sequence. The two paths produce the
+        # same evidence shape so synthesis does not care which ran.
+        planner_report: dict[str, Any] | None = None
+        if self.use_planner and self.use_llm:
+            (
+                pull_requests,
+                issues,
+                contexts,
+                diffs,
+                planner_report,
+            ) = self._collect_evidence_with_planner(normalized, commits, memory)
+        else:
+            pull_requests, issues, contexts, diffs = self._collect_evidence(
+                normalized, commits, memory
+            )
+
         evidence = {
             "commits": commits,
             "pull_requests": pull_requests,
@@ -140,6 +181,32 @@ class GitExplainerAgent:
         explanation, used_fallback, fallback_reason = self._synthesize(
             normalized, condensed_evidence
         )
+
+        # Critic round (optional). Only runs when synthesis succeeded
+        # -- there is no point asking the critic to grade a fallback
+        # template, since the fallback is by construction a literal
+        # readout of the evidence and never hallucinates.
+        critic_report: dict[str, Any] | None = None
+        if self.use_critic and self.use_llm and not used_fallback:
+            critic_report, explanation, used_fallback, fallback_reason, planner_report = (
+                self._run_critic_round(
+                    normalized,
+                    explanation,
+                    condensed_evidence,
+                    evidence,
+                    memory,
+                    planner_report=planner_report,
+                )
+            )
+            # If the critic round triggered re-planning that changed
+            # the evidence, the caller-visible PR/issue/diff lists need
+            # to reflect that.
+            commits = evidence["commits"]
+            pull_requests = evidence["pull_requests"]
+            issues = evidence["issues"]
+            contexts = evidence["file_contexts"]
+            diffs = evidence["diffs"]
+
         memory.flush()
 
         return ExplanationResult(
@@ -155,6 +222,186 @@ class GitExplainerAgent:
             used_fallback=used_fallback,
             fallback_reason=fallback_reason,
             condensation=condensation_report.to_dict(),
+            planner=planner_report,
+            critic=critic_report,
+        )
+
+    def _collect_evidence_with_planner(
+        self,
+        query: ExplainerQuery,
+        commits: list[dict[str, Any]],
+        memory: ExplainerMemory,
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        dict[str, Any],
+    ]:
+        """Planner-driven variant of :meth:`_collect_evidence`.
+
+        Seeds the planner with the commit list already produced by
+        ``trace_line_history`` so the LLM does not waste an iteration
+        recomputing it. If the planner is unavailable or halts with no
+        useful output, falls back to the deterministic fixed sequence
+        and records the fallback reason in the planner report.
+        """
+        from git_explainer.tool_registry import _empty_evidence
+
+        seed_evidence = _empty_evidence()
+        seed_evidence["commits"] = list(commits)
+
+        context = ToolCallContext(
+            repo_path=query.repo_path,
+            owner=query.owner,
+            repo_name=query.repo_name,
+            memory=memory,
+        )
+
+        # Thread the orchestrator's already-imported ``chat`` and
+        # ``is_available`` references through to the planner so test
+        # harnesses that mock ``git_explainer.orchestrator.chat`` and
+        # ``...is_available`` cover both the synthesizer AND the
+        # planner with a single patch -- and so production behavior is
+        # exactly "the planner uses the same LLM the orchestrator does".
+        result = planner_mod.plan_and_collect(
+            query_dict=query.to_dict(),
+            context=context,
+            seed_evidence=seed_evidence,
+            chat_fn=chat,
+            is_available_fn=is_available,
+        )
+
+        report = result.to_dict()
+
+        # If the planner could not run at all (no key, no SDK, hard
+        # error) or produced no successful tool calls, fall back to the
+        # fixed sequence so the agent still returns useful evidence.
+        successful_calls = sum(
+            1 for c in result.tool_calls
+            if c.status == "ok" and c.tool not in ("<done>", "<planner>")
+        )
+        if not result.available or successful_calls == 0:
+            pull_requests, issues, contexts, diffs = self._collect_evidence(
+                query, commits, memory
+            )
+            report["fell_back_to_fixed_sequence"] = True
+            return pull_requests, issues, contexts, diffs, report
+
+        report["fell_back_to_fixed_sequence"] = False
+        evidence = result.evidence
+        return (
+            evidence.get("pull_requests", []),
+            evidence.get("issues", []),
+            evidence.get("file_contexts", []),
+            evidence.get("diffs", []),
+            report,
+        )
+
+    def _run_critic_round(
+        self,
+        query: ExplainerQuery,
+        explanation: ExplanationSections,
+        condensed_evidence: dict[str, Any],
+        full_evidence: dict[str, Any],
+        memory: ExplainerMemory,
+        *,
+        planner_report: dict[str, Any] | None,
+    ) -> tuple[
+        dict[str, Any],
+        ExplanationSections,
+        bool,
+        str | None,
+        dict[str, Any] | None,
+    ]:
+        """Run the critic; on ``needs_more_evidence`` re-plan and re-synthesize.
+
+        Returns ``(critic_report, explanation, used_fallback,
+        fallback_reason, updated_planner_report)``. Mutates
+        ``full_evidence`` in place when re-planning fetches new data so
+        the caller's PR/issue/diff lists stay in sync.
+        """
+        report = critic_mod.critique(
+            query_dict=query.to_dict(),
+            explanation=dict(explanation),
+            evidence=condensed_evidence,
+        )
+        critic_dict = report.to_dict()
+
+        if report.verdict != "needs_more_evidence":
+            return critic_dict, explanation, False, None, planner_report
+
+        # Re-plan with the critic's focus hints, but only when the
+        # primary planner is enabled -- otherwise the critic has
+        # nothing to drive. The orchestrator caller controls this via
+        # ``use_planner``.
+        if not self.use_planner:
+            critic_dict["replanned"] = False
+            return critic_dict, explanation, False, None, planner_report
+
+        context = ToolCallContext(
+            repo_path=query.repo_path,
+            owner=query.owner,
+            repo_name=query.repo_name,
+            memory=memory,
+        )
+        # Reuse the existing accumulated evidence so the planner builds
+        # on what we already have.
+        seed = {
+            "commits": list(full_evidence["commits"]),
+            "pull_requests": list(full_evidence["pull_requests"]),
+            "issues": list(full_evidence["issues"]),
+            "file_contexts": list(full_evidence["file_contexts"]),
+            "diffs": list(full_evidence["diffs"]),
+            "candidate_pr_numbers": [],
+            "candidate_issue_refs": [],
+        }
+        retry = planner_mod.plan_and_collect(
+            query_dict=query.to_dict(),
+            context=context,
+            seed_evidence=seed,
+            focus_hints=report.focus_hints,
+            chat_fn=chat,
+            is_available_fn=is_available,
+        )
+        critic_dict["replanned"] = True
+        critic_dict["replan_iterations"] = retry.iterations_used
+        critic_dict["replan_halted_reason"] = retry.halted_reason
+
+        # Merge retry's new evidence back into the caller's lists.
+        full_evidence["commits"] = retry.evidence["commits"]
+        full_evidence["pull_requests"] = retry.evidence["pull_requests"]
+        full_evidence["issues"] = retry.evidence["issues"]
+        full_evidence["file_contexts"] = retry.evidence["file_contexts"]
+        full_evidence["diffs"] = retry.evidence["diffs"]
+
+        # Re-condense and re-synthesize on the enriched evidence.
+        new_condensed, _ = condense_evidence(full_evidence)
+        new_explanation, used_fallback, fallback_reason = self._synthesize(
+            query, new_condensed
+        )
+
+        # Append the retry's tool calls onto the original planner report
+        # so eval logs see the full trail.
+        if planner_report is not None:
+            planner_report = dict(planner_report)
+            existing_calls = list(planner_report.get("tool_calls", []))
+            existing_calls.extend(c.to_dict() for c in retry.tool_calls)
+            planner_report["tool_calls"] = existing_calls
+            planner_report["iterations_used"] = (
+                planner_report.get("iterations_used", 0) + retry.iterations_used
+            )
+            planner_report["replan_halted_reason"] = retry.halted_reason
+        else:
+            planner_report = retry.to_dict()
+            planner_report["fell_back_to_fixed_sequence"] = False
+
+        return (
+            critic_dict,
+            new_explanation,
+            used_fallback,
+            fallback_reason,
+            planner_report,
         )
 
     def _collect_evidence(
@@ -605,9 +852,15 @@ def explain_code_history(
     context_radius: int = 30,
     enforce_public_repo: bool = True,
     use_llm: bool = True,
+    use_planner: bool = False,
+    use_critic: bool = False,
 ) -> ExplanationResult:
     """Convenience wrapper around :class:`GitExplainerAgent`."""
-    agent = GitExplainerAgent(use_llm=use_llm)
+    agent = GitExplainerAgent(
+        use_llm=use_llm,
+        use_planner=use_planner,
+        use_critic=use_critic,
+    )
     query = ExplainerQuery(
         repo_path=repo_path,
         file_path=file_path,
