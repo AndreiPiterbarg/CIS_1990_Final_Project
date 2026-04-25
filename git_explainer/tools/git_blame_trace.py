@@ -12,6 +12,31 @@ _NULL_SHA = "0" * 40
 _FOLLOW_HISTORY_LIMIT = 200
 
 
+def _commit_parent_is_reachable(repo_path: str, sha: str) -> bool:
+    """Return True iff the first parent of ``sha`` is reachable in the local clone.
+
+    In a shallow clone, the oldest visible commit's parent is by definition
+    not present locally. ``git log -L`` then reports that boundary commit as
+    if it had introduced any unchanged lines (its diff for the line range
+    is ``/dev/null`` -> file), even though the real history runs further
+    back upstream.
+
+    We use this signal to filter out shallow-boundary commits in
+    :func:`trace_line_history`. A genuine "this commit added the file"
+    case is *also* a /dev/null diff, but in that case the parent is
+    reachable -- so checking the parent is the precise distinguisher.
+    """
+    try:
+        # ``cat-file -e`` exits 0 iff the object exists in the local clone.
+        # For a shallow-boundary commit, the parent SHA is recorded but
+        # the parent object itself isn't present locally, and cat-file -e
+        # exits non-zero -> run_git raises ValueError.
+        run_git(repo_path, ["cat-file", "-e", f"{sha}^"])
+        return True
+    except ValueError:
+        return False
+
+
 def get_blame(
     repo_path: str,
     file_path: str,
@@ -155,6 +180,21 @@ def trace_line_history(
                 seen.add(entry["full_sha"])
                 if len(entries) >= max_count:
                     break
+
+    # Drop shallow-clone-boundary commits when we have any commit with a
+    # reachable parent. ``git log -L`` reports the boundary commit as if
+    # it had introduced any unchanged line range, which surfaces as an
+    # apparent attribution to a commit whose message has nothing to do
+    # with the file (e.g. a CI workflow fix appearing to author React
+    # source code in a depth=2000 clone). If every entry is at the
+    # boundary -- e.g. the file was genuinely first added in the visible
+    # history -- we keep them as the best signal we have.
+    real_entries = [
+        entry for entry in entries
+        if _commit_parent_is_reachable(repo_path, entry["full_sha"])
+    ]
+    if real_entries:
+        entries = real_entries
 
     return entries[:max_count]
 
