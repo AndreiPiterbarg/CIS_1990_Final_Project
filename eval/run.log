@@ -1,0 +1,100 @@
+LLM-judge backend: anthropic (claude-haiku-4-5)
+Setting up repos for 29 case(s)...
+[1/29] Running config-groq-switch...
+[2/29] Running file-reader-revision-fix...
+[3/29] Running line-range-slice-fix...
+[4/29] Running issue-regex-single-commit...
+[5/29] Running guardrails-generic-msg...
+[6/29] Running fallback-summary-single-line...
+[7/29] Running orchestrator-llm-mode...
+[8/29] Running no-github-metadata...
+[9/29] Running abstention-direct-commit-no-pr...
+[10/29] Running abstention-no-owner-repo...
+[11/29] Running abstention-gitignore-init-commit...
+[12/29] Running flask-init-imports...
+[13/29] Running requests-api-surface...
+[14/29] Running question-issue-lookup-library...
+[15/29] Running question-file-context-heuristic...
+[16/29] Running adversarial-end-before-start...
+[17/29] Running adversarial-negative-line...
+[18/29] Running adversarial-end-beyond-file...
+[19/29] Running adversarial-span-too-large...
+[20/29] Running adversarial-question-with-lines...
+[21/29] Running adversarial-prompt-injection...
+[22/29] Running adversarial-no-match-question...
+[23/29] Running requests-exceptions-imports...
+[24/29] Running react-use-optimistic-hook...
+[25/29] Running react-start-transition-noop-import...
+[26/29] Running react-taint-binary-flight-removal...
+[27/29] Running cpython-stdev-infinite-check...
+[28/29] Running cpython-fmean-speedup...
+[29/29] Running cpython-json-array-hook...
+
+=== Git Explainer Evaluation Report ===
+Ran 29 cases across 5 repos in 135.1s
+
+PASSED  config-groq-switch  (0.6s)  [all 7 checks passed]
+PASSED  file-reader-revision-fix  (0.5s)  [all 7 checks passed]
+PASSED  line-range-slice-fix  (0.6s)  [all 7 checks passed]
+PASSED  issue-regex-single-commit  (0.5s)  [all 7 checks passed]
+PASSED  guardrails-generic-msg  (0.6s)  [all 7 checks passed]
+PASSED  fallback-summary-single-line  (0.5s)  [all 7 checks passed]
+PASSED  orchestrator-llm-mode  (3.8s)  [all 6 checks passed]
+PASSED  no-github-metadata  (0.1s)  [all 6 checks passed]
+PASSED  abstention-direct-commit-no-pr  (0.5s)  [all 5 checks passed]
+PASSED  abstention-no-owner-repo  (0.1s)  [all 5 checks passed]
+PASSED  abstention-gitignore-init-commit  (0.5s)  [all 7 checks passed]
+PASSED  flask-init-imports  (14.3s)  [all 6 checks passed]
+PASSED  requests-api-surface  (14.1s)  [all 6 checks passed]
+PASSED  question-issue-lookup-library  (1.2s)  [all 4 checks passed]
+PASSED  question-file-context-heuristic  (0.9s)  [all 5 checks passed]
+PASSED  adversarial-end-before-start  (0.0s)  [all 2 checks passed]
+PASSED  adversarial-negative-line  (0.0s)  [all 2 checks passed]
+PASSED  adversarial-end-beyond-file  (0.0s)  [all 2 checks passed]
+PASSED  adversarial-span-too-large  (0.0s)  [all 2 checks passed]
+PASSED  adversarial-question-with-lines  (0.0s)  [all 2 checks passed]
+PASSED  adversarial-prompt-injection  (1.7s)  [all 1 checks passed] [TRIVIAL CHECKS ONLY]
+PASSED  adversarial-no-match-question  (0.5s)  [all 2 checks passed]
+PASSED  requests-exceptions-imports  (10.1s)  [all 6 checks passed]
+PASSED  react-use-optimistic-hook  (2.9s)  [all 6 checks passed]
+PASSED  react-start-transition-noop-import  (3.7s)  [all 6 checks passed]
+PASSED  react-taint-binary-flight-removal  (2.8s)  [all 6 checks passed]
+PASSED  cpython-stdev-infinite-check  (2.8s)  [all 6 checks passed]
+PASSED  cpython-fmean-speedup  (2.6s)  [all 6 checks passed]
+PASSED  cpython-json-array-hook  (4.7s)  [all 6 checks passed]
+
+--- Pass/fail ---
+Summary: 29 passed, 0 failed, 0 errors out of 29 total
+Pass rate: 100.0%
+Non-trivial pass rate: 100.0% (28/28 cases with at least one non-plumbing check)
+Trivial-checks-only cases: 1 -> adversarial-prompt-injection
+
+--- Evidence retrieval ---
+Recall: 100.0% (77/77 targets, 20 cases contributed)
+Commit SHA match rate: 100.0% (21/21 expected SHAs)
+Must-abstain precision: 100.0% (11/11 cases returned zero PR/issue noise, total stray PRs=0, stray issues=0)
+
+--- Format compliance (NOT honesty) ---
+Citation coverage: 99.0% (201/203 sentences) -- near-100% by construction, the prompt enforces it.
+Citation ID validity: 100.0% (340/340 IDs exist in returned evidence).
+
+--- Explanation honesty ---
+Citation semantic support: 42.1% (143/340 citations share a content word with their sentence — weak signal, not entailment).
+LLM-judge faithfulness (HEADLINE): 91.3% pass (21/23 accurate-or-partial), strict 78.3% (18 fully accurate).
+  breakdown: accurate=18  partially_accurate=3  hallucinated=2  unscored=0  skipped=0
+Faithfulness proxy score (PROXY — not ground truth): 3.86/5.00 (23/29 cases scored)
+
+--- Latency ---
+Latency: avg 2.44s | p50 0.62s | p95 12.47s
+
+--- What these numbers do NOT prove ---
+  - Pass rate counts a case as passed iff every configured check is true. Cases whose only checks are plumbing (used_fallback, filename mention, resolved_file_path, resolved_matched_terms) are surfaced in `trivial_check_case_ids` so they can be excluded when judging honesty.
+  - Retrieval accuracy is recall against hand-picked gold targets. Cases without gold targets are not counted; see `no_retrieval_target_case_ids`.
+  - Retrieval precision is only measured on must-abstain cases (see `summary.retrieval.must_abstain_*`); for positive-target cases the gold list is a lower bound, so extra evidence is not penalized here.
+  - Citation coverage is a format-compliance metric — the prompt and fallback both require a citation in every citable sentence.
+  - Citation validity only checks that the cited ID exists in the returned evidence. It does not verify the artifact supports the claim.
+  - Citation support is a weak semantic-overlap check: at least one content word shared between the sentence and the cited artifact's text. It detects glued-on citations; it does not prove entailment.
+  - Faithfulness rubric is a PROXY, averaged over only the components with signal for each case (answer_completeness, retrieval_support, citation_grounding, abstention_correctness). Components with no signal return null rather than defaulting to 1.0.
+  - abstention_correctness scores thin-evidence cases by whether the explanation mentions an abstention marker; rich-evidence cases score full marks. It is not a test of claim-level honesty.
+
+Results written to eval\results.json
