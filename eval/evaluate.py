@@ -25,6 +25,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from git_explainer import llm
 from git_explainer.orchestrator import ExplanationResult, explain_code_history
 
+# Eval-only Anthropic judge adapter. Imported by name (not via wildcard) so
+# the agent's runtime LLM path stays on Groq and is untouched.
+try:
+    from eval import judge_anthropic
+except ImportError:  # pragma: no cover — when running this file as a script
+    import judge_anthropic  # type: ignore[no-redef]
+
 
 @dataclass
 class BenchmarkCase:
@@ -87,6 +94,60 @@ _CITATION_TOKEN_RE = re.compile(
     r"\[(?P<kind>commit|pr|issue):(?P<value>(?:[0-9a-f]{7,40}|none)|#\d+)\]"
 )
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+# Stopwords used when computing sentence<->evidence keyword overlap for
+# citation_support. Kept small and domain-neutral so we neither overfit to
+# git prose nor accidentally drop content words.
+_CITATION_SUPPORT_STOPWORDS = frozenset(
+    {
+        "the", "a", "an", "and", "or", "but", "if", "then", "else", "of", "in",
+        "on", "at", "to", "for", "by", "with", "from", "as", "is", "are", "was",
+        "were", "be", "been", "being", "has", "have", "had", "do", "does", "did",
+        "this", "that", "these", "those", "it", "its", "into", "over", "about",
+        "which", "who", "whom", "what", "when", "where", "why", "how", "we",
+        "they", "their", "our", "not", "no", "yes", "so", "than", "also", "more",
+        "most", "some", "any", "all", "such", "via", "per", "out", "up", "down",
+        "should", "would", "could", "may", "might", "can", "will", "shall",
+        "because", "due", "been", "added", "add", "change", "changed", "changes",
+        "new", "old", "made", "make", "used", "use", "using",
+    }
+)
+
+# Tokens that signal the agent flagged limits or abstained from unsupported
+# claims. Used to make scope_honesty reflect actual behavior on thin cases
+# rather than just counting whether the limitations block has citations.
+_ABSTENTION_MARKERS = (
+    "no linked pull request",
+    "no associated issue",
+    "no associated pull request",
+    "no linked issue",
+    "no linked issues",
+    "no pull request",
+    "no issue found",
+    "no issues found",
+    "not found",
+    "no evidence",
+    "limited evidence",
+    "insufficient evidence",
+    "uncertain",
+    "unknown",
+    "cannot determine",
+    "without additional",
+)
+
+# A check is "trivial" if it only asserts plumbing we could pass by echoing
+# boilerplate (the fallback flag, a filename mention, the resolved file path,
+# or the literal citation prefix). Used to separate pass-rate honesty from
+# pass-rate-by-plumbing.
+_TRIVIAL_CHECK_NAMES = frozenset(
+    {
+        "used_fallback",
+        "explanation_contains",
+        "resolved_file_path",
+        "resolved_preview_contains",
+        "resolved_matched_terms",
+    }
+)
 
 
 def load_benchmark(path: Path) -> list[BenchmarkCase]:
@@ -355,8 +416,20 @@ def score_case(
         )
 
     if "faithfulness_rubric_min" in expected:
+        overall = faithfulness_metrics["overall"]
         checks["faithfulness_rubric_min"] = (
-            faithfulness_metrics["overall"] >= expected["faithfulness_rubric_min"]
+            overall is not None and overall >= expected["faithfulness_rubric_min"]
+        )
+
+    if "citation_support_min" in expected:
+        support = citation_metrics.get("citation_support")
+        checks["citation_support_min"] = (
+            support is not None and support >= expected["citation_support_min"]
+        )
+
+    if expected.get("must_abstain"):
+        checks["must_abstain"] = (
+            retrieval_metrics.get("retrieval_precision") == 1.0
         )
 
     llm_judge: dict[str, Any] | None = None
@@ -392,7 +465,14 @@ def _compute_retrieval_metrics(
     case: BenchmarkCase,
     result: ExplanationResult,
 ) -> dict[str, Any]:
-    """Compute benchmark retrieval accuracy against gold targets in the case."""
+    """Compute benchmark retrieval recall + must-abstain precision against gold targets.
+
+    Recall side: count hits against hand-authored positive targets.
+    Precision side: only measured on must-abstain cases (`expects_no_*: true`
+    or an explicit empty `pr_numbers: []` / `issue_numbers: []`). For
+    positive-target cases we do NOT penalize extra PRs/issues because the
+    gold lists are a lower bound, not an exhaustive enumeration.
+    """
     expected = case.expected
     matched = 0
     targets = 0
@@ -452,6 +532,35 @@ def _compute_retrieval_metrics(
 
     accuracy = _safe_ratio(matched, targets)
     sha_breakdown = breakdown.get("commit_shas", {"matched": 0, "targets": 0})
+
+    # Must-abstain precision: on cases that assert "return none", any
+    # returned PR/issue is noise. This is the only axis where we can
+    # measure precision honestly without per-case exhaustive gold lists.
+    must_abstain_prs = bool(expected.get("expects_no_pull_requests")) or (
+        "expects_no_pull_requests" not in expected
+        and "pr_numbers" in expected
+        and expected["pr_numbers"] == []
+    )
+    must_abstain_issues = bool(expected.get("expects_no_issues")) or (
+        "expects_no_issues" not in expected
+        and "issue_numbers" in expected
+        and expected["issue_numbers"] == []
+    )
+    unexpected_prs = 0
+    unexpected_issues = 0
+    precision_applicable = False
+    if must_abstain_prs:
+        precision_applicable = True
+        unexpected_prs = len(result.get("pull_requests", []) or [])
+    if must_abstain_issues:
+        precision_applicable = True
+        unexpected_issues = len(result.get("issues", []) or [])
+
+    precision: float | None = None
+    if precision_applicable:
+        noise = unexpected_prs + unexpected_issues
+        precision = 1.0 if noise == 0 else 0.0
+
     return {
         "retrieval_matched_count": matched,
         "retrieval_target_count": targets,
@@ -459,6 +568,10 @@ def _compute_retrieval_metrics(
         "retrieval_breakdown": breakdown,
         "commit_sha_matches": sha_breakdown["matched"],
         "commit_sha_total": sha_breakdown["targets"],
+        "unexpected_prs": unexpected_prs,
+        "unexpected_issues": unexpected_issues,
+        "precision_applicable": precision_applicable,
+        "retrieval_precision": precision,
     }
 
 
@@ -484,12 +597,25 @@ def _commit_sha_matches(expected_sha: str, commits: list[dict[str, Any]]) -> boo
 
 
 def _compute_citation_metrics(result: ExplanationResult) -> dict[str, Any]:
-    """Measure sentence-level citation coverage and citation validity."""
+    """Measure citation coverage, validity (ID-exists), and support (semantic overlap).
+
+    - coverage: fraction of citable sentences that contain any citation. This
+      is largely a format-compliance metric because the prompt and fallback
+      both require it, so it is reported but not headlined.
+    - validity: fraction of citation tokens whose referenced ID actually
+      appears in the returned evidence. Necessary but not sufficient: a
+      sentence can cite a real commit that does not support its claim.
+    - support: fraction of citation tokens where the cited artifact's
+      text shares at least one content word with the citing sentence.
+      Intended to catch citations that look real but are glued onto
+      unrelated prose. This is a weak signal, not ground truth.
+    """
     sections = result["explanation"]
     citable_sentences = 0
     cited_sentences = 0
     total_citations = 0
     valid_citations = 0
+    supported_citations = 0
 
     for text in sections.values():
         for sentence in _iter_citable_sentences(str(text)):
@@ -498,11 +624,14 @@ def _compute_citation_metrics(result: ExplanationResult) -> dict[str, Any]:
             if citations:
                 cited_sentences += 1
             total_citations += len(citations)
-            valid_citations += sum(
-                1
-                for match in citations
-                if _citation_is_valid(result, match.group("kind"), match.group("value"))
-            )
+            sentence_tokens = _content_tokens(sentence)
+            for match in citations:
+                kind = match.group("kind")
+                value = match.group("value")
+                if _citation_is_valid(result, kind, value):
+                    valid_citations += 1
+                    if _citation_is_supported(result, kind, value, sentence_tokens):
+                        supported_citations += 1
 
     return {
         "citable_sentence_count": citable_sentences,
@@ -511,7 +640,65 @@ def _compute_citation_metrics(result: ExplanationResult) -> dict[str, Any]:
         "citation_count": total_citations,
         "valid_citation_count": valid_citations,
         "citation_validity": _safe_ratio(valid_citations, total_citations),
+        "supported_citation_count": supported_citations,
+        "citation_support": _safe_ratio(supported_citations, total_citations),
     }
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Tokenize free text into lowercase content words for overlap checks."""
+    stripped = _CITATION_TOKEN_RE.sub(" ", text.lower())
+    raw = re.findall(r"[a-z][a-z0-9_]{2,}", stripped)
+    return {token for token in raw if token not in _CITATION_SUPPORT_STOPWORDS}
+
+
+def _citation_is_supported(
+    result: ExplanationResult,
+    kind: str,
+    value: str,
+    sentence_tokens: set[str],
+) -> bool:
+    """Return True if the cited artifact's text shares a content word with the sentence.
+
+    Falls back to True for the sentinel `[commit:none]` token when the agent
+    legitimately asserts no commit evidence, so abstention language is not
+    punished.
+    """
+    if kind == "commit" and value == "none":
+        return True
+    if not sentence_tokens:
+        # Pure citation-only sentence (all words stripped). Treat as supported
+        # rather than mark every such citation as unsupported noise.
+        return True
+
+    artifact_text = ""
+    if kind == "commit":
+        for commit in result.get("commits", []) or []:
+            short = str(commit.get("sha", ""))
+            full = str(commit.get("full_sha", ""))
+            if value == short or (full and full.startswith(value)):
+                artifact_text = str(commit.get("message", ""))
+                break
+    else:
+        number = int(value.lstrip("#"))
+        collection = (
+            result.get("pull_requests", []) if kind == "pr" else result.get("issues", [])
+        ) or []
+        for artifact in collection:
+            if artifact.get("number") == number:
+                artifact_text = " ".join(
+                    [
+                        str(artifact.get("title", "")),
+                        str(artifact.get("body", "")),
+                    ]
+                )
+                break
+
+    if not artifact_text:
+        return False
+
+    artifact_tokens = _content_tokens(artifact_text)
+    return bool(sentence_tokens & artifact_tokens)
 
 
 def _compute_faithfulness_metrics(
@@ -520,60 +707,103 @@ def _compute_faithfulness_metrics(
     retrieval_metrics: dict[str, Any],
     citation_metrics: dict[str, Any],
 ) -> dict[str, Any]:
-    """Estimate rubric-style faithfulness from retrieval, citations, and answer completeness."""
+    """Estimate rubric-style faithfulness from retrieval, citations, and answer completeness.
+
+    This is a PROXY. It is not a ground-truth honesty score. Design goals:
+
+    - Components that cannot be honestly measured for a given case return
+      ``None`` and are excluded from the overall average, so "no signal"
+      does not masquerade as a perfect score.
+    - ``citation_grounding`` uses the semantic support rate when available,
+      falling back to validity — never to coverage, which is near-100% by
+      construction and inflates the number.
+    - ``abstention_correctness`` replaces the old ``scope_honesty`` hack:
+      cases with evidence score full marks; thin-evidence cases score by
+      whether the explanation actually flags the limit, not by whether the
+      limitations section happens to contain a citation token.
+    """
     sections = result["explanation"]
     all_text = " ".join(str(sections[key]) for key in sections).lower()
 
-    non_empty_sections = sum(1 for text in sections.values() if str(text).strip())
-    completeness_ratio = non_empty_sections / len(sections) if sections else 0.0
-
+    # answer_completeness: only count what we can actually verify. If the
+    # case ships expected phrases, use those. If not, we do NOT reward the
+    # agent for simply having non-empty sections — return None.
     expected_phrases = case.expected.get("explanation_contains", [])
     if expected_phrases:
-        phrase_ratio = sum(
-            1 for phrase in expected_phrases if phrase.lower() in all_text
-        ) / len(expected_phrases)
-        answer_ratio = (completeness_ratio + phrase_ratio) / 2
-    else:
-        answer_ratio = completeness_ratio
-
-    retrieval_ratio = retrieval_metrics["retrieval_accuracy"]
-    if retrieval_ratio is None:
-        expected_min_commits = case.expected.get("min_commits")
-        if expected_min_commits:
-            retrieval_ratio = min(len(result["commits"]) / expected_min_commits, 1.0)
+        non_trivial = [p for p in expected_phrases if not _is_trivial_phrase(p)]
+        if non_trivial:
+            hits = sum(1 for phrase in non_trivial if phrase.lower() in all_text)
+            answer_ratio: float | None = hits / len(non_trivial)
         else:
-            retrieval_ratio = 1.0 if result["commits"] or result["resolved_target"] else 0.0
-
-    citation_ratio = citation_metrics["citation_coverage"] or 0.0
-    if citation_metrics["citation_validity"] is not None:
-        citation_ratio = (citation_ratio + citation_metrics["citation_validity"]) / 2
-
-    limitations_text = str(sections.get("limitations", ""))
-    limitation_sentences = list(_iter_citable_sentences(limitations_text))
-    if limitation_sentences:
-        limitation_cited = sum(
-            1 for sentence in limitation_sentences if _CITATION_TOKEN_RE.search(sentence)
-        )
-        limitations_ratio = limitation_cited / len(limitation_sentences)
+            answer_ratio = None
     else:
-        limitations_ratio = 0.0
+        answer_ratio = None
+
+    # retrieval_support: strictly the measured recall against gold targets.
+    # If there are no positive gold targets, we have no signal — return
+    # None rather than defaulting to 1.0 or to a min_commits heuristic,
+    # which previously let external-repo cases with weak gold data score
+    # full marks on retrieval.
+    retrieval_ratio: float | None = retrieval_metrics["retrieval_accuracy"]
+
+    # citation_grounding: prefer semantic support over ID-validity; never
+    # use coverage alone (near-100% by construction).
+    if citation_metrics["citation_count"] == 0:
+        citation_ratio: float | None = None
+    elif citation_metrics["citation_support"] is not None:
+        citation_ratio = citation_metrics["citation_support"]
+    else:
+        citation_ratio = citation_metrics["citation_validity"]
+
+    # abstention_correctness: measure actual abstention behavior. "Thin"
+    # cases (no PRs and no issues in the returned evidence) must surface
+    # an abstention marker to score; rich-evidence cases score full marks.
+    has_prs = bool(result.get("pull_requests"))
+    has_issues = bool(result.get("issues"))
+    if has_prs and has_issues:
+        abstention_ratio: float | None = 1.0
+    else:
+        abstention_ratio = 1.0 if _mentions_abstention(all_text) else 0.0
 
     component_ratios = {
         "answer_completeness": answer_ratio,
         "retrieval_support": retrieval_ratio,
         "citation_grounding": citation_ratio,
-        "scope_honesty": limitations_ratio,
+        "abstention_correctness": abstention_ratio,
     }
-    overall_ratio = sum(component_ratios.values()) / len(component_ratios)
+    measured = {k: v for k, v in component_ratios.items() if v is not None}
+    if measured:
+        overall_ratio = sum(measured.values()) / len(measured)
+        overall = _ratio_to_rubric(overall_ratio)
+    else:
+        overall = None
 
     return {
         "mode": "proxy",
-        "overall": _ratio_to_rubric(overall_ratio),
+        "overall": overall,
+        "measured_component_count": len(measured),
+        "total_component_count": len(component_ratios),
         "components": {
-            name: _ratio_to_rubric(ratio)
+            name: (_ratio_to_rubric(ratio) if ratio is not None else None)
             for name, ratio in component_ratios.items()
         },
     }
+
+
+def _is_trivial_phrase(phrase: str) -> bool:
+    """Return True for `explanation_contains` entries that only test formatting.
+
+    ``"[commit:"``, ``"[pr:"``, ``"[issue:"`` all pass the moment the agent
+    emits a single citation token, regardless of what it actually said.
+    """
+    lowered = phrase.strip().lower()
+    return lowered in {"[commit:", "[pr:", "[issue:"}
+
+
+def _mentions_abstention(text: str) -> bool:
+    """Return True if the explanation surfaces any abstention/uncertainty marker."""
+    lowered = text.lower()
+    return any(marker in lowered for marker in _ABSTENTION_MARKERS)
 
 
 _LLM_JUDGE_SYSTEM_PROMPT = (
@@ -732,24 +962,46 @@ def _llm_judge_meets_min_rating(rating: str, min_rating: str) -> bool:
     return actual >= threshold
 
 
+def _judge_backend() -> tuple[str, Any] | None:
+    """Pick the LLM-judge backend, preferring Anthropic for independence from the Groq agent.
+
+    Returns ``(name, callable)`` where ``callable(user_content, system_prompt,
+    temperature)`` returns the judge's response text, or ``None`` if no
+    judge LLM is configured.
+    """
+    if judge_anthropic.is_available():
+        return ("anthropic-" + judge_anthropic.model_id(), judge_anthropic.chat)
+    if llm.is_available():
+        return ("groq-" + str(llm.config.GROQ_MODEL), llm.chat)
+    return None
+
+
 def _compute_llm_judge_faithfulness(
     result: ExplanationResult,
     case: BenchmarkCase,
 ) -> dict[str, Any]:
     """Rate an agent explanation on the 3-point faithfulness rubric via an LLM judge."""
-    if not llm.is_available():
+    backend = _judge_backend()
+    if backend is None:
         return {
             "rating": "skipped",
-            "reasoning": "llm unavailable",
+            "reasoning": "no judge LLM configured (set ANTHROPIC_API_KEY or GROQ_API_KEY)",
             "contradictions": [],
             "passes": False,
             "raw_response": None,
+            "judge_model": None,
         }
+    judge_name, judge_chat = backend
 
     prompt = _build_llm_judge_prompt(result, case)
     raw_response: str | None = None
+    last_exc_repr: str | None = None
 
-    for attempt in range(2):
+    # Up to 3 attempts: attempt 0 is the real prompt; attempt 1 is a retry
+    # that also asks for strict JSON (covers parse failures); attempt 2 is
+    # an extra rate-limit cushion. Transient 429s get a back-off sleep so
+    # a single rate-limit burst does not silently disqualify 12+ cases.
+    for attempt in range(3):
         if attempt == 0:
             user_content = prompt
         else:
@@ -759,18 +1011,32 @@ def _compute_llm_judge_faithfulness(
                 "No prose. No markdown fences.\n\n" + prompt
             )
         try:
-            raw_response = llm.chat(
+            raw_response = judge_chat(
                 user_content,
                 system_prompt=_LLM_JUDGE_SYSTEM_PROMPT,
                 temperature=0.0,
             )
         except Exception as exc:  # noqa: BLE001 — judge failure is non-fatal
+            last_exc_repr = f"{type(exc).__name__}: {exc}"
+            msg = str(exc).lower()
+            is_rate_limit = (
+                "ratelimit" in type(exc).__name__.lower()
+                or "429" in msg
+                or "rate_limit" in msg
+                or "rate limit" in msg
+                or "quota" in msg
+            )
+            if is_rate_limit and attempt < 2:
+                sleep_seconds = 30.0 if attempt == 0 else 60.0
+                time.sleep(sleep_seconds)
+                continue
             return {
                 "rating": "unscored",
-                "reasoning": f"judge call failed: {type(exc).__name__}: {exc}",
+                "reasoning": f"judge call failed: {last_exc_repr}",
                 "contradictions": [],
                 "passes": False,
                 "raw_response": None,
+                "judge_model": judge_name,
             }
 
         parsed = _parse_llm_judge_response(raw_response)
@@ -781,14 +1047,21 @@ def _compute_llm_judge_faithfulness(
                 "contradictions": parsed["contradictions"],
                 "passes": parsed["rating"] in _LLM_JUDGE_PASS_RATINGS,
                 "raw_response": None,
+                "judge_model": judge_name,
             }
 
     return {
         "rating": "unscored",
-        "reasoning": "failed to parse judge response as JSON after retry",
+        "reasoning": (
+            f"failed to parse judge response as JSON after retries "
+            f"(last_error={last_exc_repr})"
+            if last_exc_repr
+            else "failed to parse judge response as JSON after retries"
+        ),
         "contradictions": [],
         "passes": False,
         "raw_response": raw_response,
+        "judge_model": judge_name,
     }
 
 
@@ -829,6 +1102,31 @@ def run_case(
         elapsed = time.monotonic() - t0
         if expects_error:
             return score_error_case(case, None, elapsed)
+        # When the case requires the LLM (use_llm=True) and the agent fell
+        # back specifically because the LLM call raised (rate limit, daily
+        # quota, transport error), this is an environmental failure -- not
+        # an agent regression. Mark the case skipped instead of failed so
+        # the harness's pass-rate denominator is not contaminated by transient
+        # upstream outages. The orchestrator surfaces the structured reason
+        # via ``result["fallback_reason"]``.
+        if (
+            use_llm
+            and result.get("used_fallback")
+            and result.get("fallback_reason") == "llm_error"
+        ):
+            return CaseScore(
+                case_id=case.id,
+                passed=False,
+                checks={},
+                elapsed_seconds=round(elapsed, 3),
+                skipped=True,
+                skip_reason=(
+                    "LLM call failed at agent runtime (transient upstream "
+                    "error -- rate limit, quota, transport, or 5xx). The "
+                    "agent fell back deterministically; this is not a code "
+                    "regression."
+                ),
+            )
         return score_case(case, result, elapsed, use_llm_judge=use_llm_judge)
     except Exception as exc:
         elapsed = time.monotonic() - t0
@@ -906,21 +1204,42 @@ def summarize_scores(
     scores: list[CaseScore],
     total_elapsed: float,
 ) -> dict[str, Any]:
-    """Aggregate benchmark-wide metrics from per-case scores."""
+    """Aggregate benchmark-wide metrics from per-case scores.
+
+    Every aggregate reports a denominator so downstream consumers cannot mistake
+    "no cases contributed" for "the metric was at ceiling." The pass rate is
+    also reported twice: overall, and restricted to non-trivial cases (cases
+    with at least one non-plumbing check), so headline pass rate cannot be
+    inflated by cases whose only checks are ``used_fallback`` + a filename
+    mention.
+    """
     passed_count = 0
     failed_count = 0
     error_count = 0
     skipped_count = 0
 
+    non_trivial_passed = 0
+    non_trivial_failed = 0
+
     retrieval_matched = 0
     retrieval_targets = 0
     commit_sha_matches = 0
     commit_sha_total = 0
+    retrieval_cases_with_targets = 0
+
+    precision_applicable_cases = 0
+    precision_passing_cases = 0
+    total_unexpected_prs = 0
+    total_unexpected_issues = 0
+
     cited_sentences = 0
     citable_sentences = 0
     valid_citations = 0
+    supported_citations = 0
     total_citations = 0
+
     faithfulness_scores: list[float] = []
+    faithfulness_unscored_cases = 0
     latencies = [score.elapsed_seconds for score in scores if not score.skipped]
 
     llm_judge_accurate = 0
@@ -937,23 +1256,45 @@ def summarize_scores(
         if score.error:
             error_count += 1
             continue
+
+        has_non_trivial_check = any(
+            name not in _TRIVIAL_CHECK_NAMES for name in score.checks
+        )
         if score.passed:
             passed_count += 1
+            if has_non_trivial_check:
+                non_trivial_passed += 1
         else:
             failed_count += 1
+            if has_non_trivial_check:
+                non_trivial_failed += 1
 
+        targets = int(score.metrics.get("retrieval_target_count", 0))
         retrieval_matched += int(score.metrics.get("retrieval_matched_count", 0))
-        retrieval_targets += int(score.metrics.get("retrieval_target_count", 0))
+        retrieval_targets += targets
+        if targets > 0:
+            retrieval_cases_with_targets += 1
         commit_sha_matches += int(score.metrics.get("commit_sha_matches", 0))
         commit_sha_total += int(score.metrics.get("commit_sha_total", 0))
+
+        if score.metrics.get("precision_applicable"):
+            precision_applicable_cases += 1
+            if score.metrics.get("retrieval_precision") == 1.0:
+                precision_passing_cases += 1
+            total_unexpected_prs += int(score.metrics.get("unexpected_prs", 0))
+            total_unexpected_issues += int(score.metrics.get("unexpected_issues", 0))
+
         cited_sentences += int(score.metrics.get("cited_sentence_count", 0))
         citable_sentences += int(score.metrics.get("citable_sentence_count", 0))
         valid_citations += int(score.metrics.get("valid_citation_count", 0))
+        supported_citations += int(score.metrics.get("supported_citation_count", 0))
         total_citations += int(score.metrics.get("citation_count", 0))
 
         faithfulness = score.metrics.get("faithfulness_rubric", {}).get("overall")
         if faithfulness is not None:
             faithfulness_scores.append(float(faithfulness))
+        else:
+            faithfulness_unscored_cases += 1
 
         judge = score.metrics.get("llm_judge")
         if judge is not None:
@@ -973,6 +1314,8 @@ def summarize_scores(
     total = len(scores)
     ran_total = passed_count + failed_count + error_count
     pass_rate = _safe_ratio(passed_count, ran_total)
+    non_trivial_ran = non_trivial_passed + non_trivial_failed
+    non_trivial_pass_rate = _safe_ratio(non_trivial_passed, non_trivial_ran)
     average_latency = round(sum(latencies) / len(latencies), 3) if latencies else None
     average_faithfulness = (
         round(sum(faithfulness_scores) / len(faithfulness_scores), 3)
@@ -985,6 +1328,7 @@ def summarize_scores(
         llm_judge_accurate + llm_judge_partial,
         llm_judge_scored,
     )
+    llm_judge_strict_pass_rate = _safe_ratio(llm_judge_accurate, llm_judge_scored)
     llm_judge_summary: dict[str, Any] | None = None
     if llm_judge_any_present:
         llm_judge_summary = {
@@ -995,6 +1339,7 @@ def summarize_scores(
             "skipped_count": llm_judge_skipped,
             "scored_count": llm_judge_scored,
             "pass_rate": llm_judge_pass_rate,
+            "strict_pass_rate": llm_judge_strict_pass_rate,
         }
 
     return {
@@ -1008,15 +1353,26 @@ def summarize_scores(
             "errors": error_count,
             "skipped": skipped_count,
             "total": total,
+            "non_trivial_passed": non_trivial_passed,
+            "non_trivial_ran": non_trivial_ran,
         },
         "pass_rate": pass_rate,
+        "non_trivial_pass_rate": non_trivial_pass_rate,
         "retrieval": {
             "matched_count": retrieval_matched,
             "target_count": retrieval_targets,
             "accuracy": _safe_ratio(retrieval_matched, retrieval_targets),
+            "cases_with_targets": retrieval_cases_with_targets,
             "commit_sha_matches": commit_sha_matches,
             "commit_sha_total": commit_sha_total,
             "commit_sha_accuracy": _safe_ratio(commit_sha_matches, commit_sha_total),
+            "must_abstain_cases": precision_applicable_cases,
+            "must_abstain_passed": precision_passing_cases,
+            "must_abstain_precision": _safe_ratio(
+                precision_passing_cases, precision_applicable_cases
+            ),
+            "unexpected_prs_total": total_unexpected_prs,
+            "unexpected_issues_total": total_unexpected_issues,
         },
         "citation": {
             "cited_sentence_count": cited_sentences,
@@ -1025,11 +1381,19 @@ def summarize_scores(
             "valid_citation_count": valid_citations,
             "citation_count": total_citations,
             "validity": _safe_ratio(valid_citations, total_citations),
+            "supported_citation_count": supported_citations,
+            "support_rate": _safe_ratio(supported_citations, total_citations),
         },
         "faithfulness_rubric": {
             "mode": "proxy",
             "average": average_faithfulness,
             "case_count": len(faithfulness_scores),
+            "unscored_case_count": faithfulness_unscored_cases,
+            "warning": (
+                "This is a proxy score averaged from measured components only. "
+                "It does not verify claim-level correctness. Prefer llm_judge "
+                "when reporting a headline faithfulness number."
+            ),
         },
         "llm_judge": llm_judge_summary,
         "latency": {
@@ -1038,11 +1402,102 @@ def summarize_scores(
             "p50_seconds": _percentile(latencies, 0.50),
             "p95_seconds": _percentile(latencies, 0.95),
         },
+        "evaluation_honesty": _build_evaluation_honesty(
+            cases,
+            scores,
+            llm_judge_any_present=llm_judge_any_present,
+            llm_judge_scored=llm_judge_scored,
+        ),
+    }
+
+
+def _build_evaluation_honesty(
+    cases: list[BenchmarkCase],
+    scores: list[CaseScore],
+    *,
+    llm_judge_any_present: bool,
+    llm_judge_scored: int,
+) -> dict[str, Any]:
+    """Machine-readable self-audit of what the numbers in this report do and do not prove."""
+    ran_cases = [
+        case
+        for case, score in zip(cases, scores, strict=False)
+        if not score.skipped and not score.error
+    ]
+    ran_scores = [score for score in scores if not score.skipped and not score.error]
+
+    trivial_only_ids = [
+        score.case_id
+        for score in ran_scores
+        if score.checks and all(name in _TRIVIAL_CHECK_NAMES for name in score.checks)
+    ]
+    no_retrieval_target_ids = [
+        score.case_id
+        for score in ran_scores
+        if int(score.metrics.get("retrieval_target_count", 0)) == 0
+    ]
+    no_citation_ids = [
+        score.case_id
+        for score in ran_scores
+        if int(score.metrics.get("citation_count", 0)) == 0
+    ]
+
+    caveats: list[str] = [
+        "Pass rate counts a case as passed iff every configured check is true. "
+        "Cases whose only checks are plumbing (used_fallback, filename mention, "
+        "resolved_file_path, resolved_matched_terms) are surfaced in "
+        "`trivial_check_case_ids` so they can be excluded when judging honesty.",
+        "Retrieval accuracy is recall against hand-picked gold targets. Cases "
+        "without gold targets are not counted; see `no_retrieval_target_case_ids`.",
+        "Retrieval precision is only measured on must-abstain cases (see "
+        "`summary.retrieval.must_abstain_*`); for positive-target cases the "
+        "gold list is a lower bound, so extra evidence is not penalized here.",
+        "Citation coverage is a format-compliance metric — the prompt and "
+        "fallback both require a citation in every citable sentence.",
+        "Citation validity only checks that the cited ID exists in the "
+        "returned evidence. It does not verify the artifact supports the claim.",
+        "Citation support is a weak semantic-overlap check: at least one "
+        "content word shared between the sentence and the cited artifact's "
+        "text. It detects glued-on citations; it does not prove entailment.",
+        "Faithfulness rubric is a PROXY, averaged over only the components "
+        "with signal for each case (answer_completeness, retrieval_support, "
+        "citation_grounding, abstention_correctness). Components with no "
+        "signal return null rather than defaulting to 1.0.",
+        "abstention_correctness scores thin-evidence cases by whether the "
+        "explanation mentions an abstention marker; rich-evidence cases "
+        "score full marks. It is not a test of claim-level honesty.",
+    ]
+
+    headline: dict[str, Any] = {
+        "preferred_faithfulness_metric": (
+            "llm_judge" if llm_judge_any_present and llm_judge_scored > 0 else "none"
+        ),
+        "proxy_faithfulness_is_ground_truth": False,
+        "citation_coverage_is_format_compliance": True,
+    }
+
+    return {
+        "total_cases": len(cases),
+        "ran_cases": len(ran_cases),
+        "trivial_check_case_ids": trivial_only_ids,
+        "no_retrieval_target_case_ids": no_retrieval_target_ids,
+        "no_citation_case_ids": no_citation_ids,
+        "headline": headline,
+        "caveats": caveats,
     }
 
 
 def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
-    """Print a human-readable summary report to stdout."""
+    """Print a human-readable summary report to stdout.
+
+    The report is split into four sections so format-compliance metrics
+    cannot be mistaken for honesty metrics:
+
+      1. Pass/fail roll-up (with a separate non-trivial pass rate)
+      2. Evidence retrieval (recall, must-abstain precision, SHA hits)
+      3. Format compliance (citation coverage + validity — reported, not celebrated)
+      4. Explanation honesty (LLM judge is the headline; proxy rubric is clearly labeled)
+    """
     print()
     print("=== Git Explainer Evaluation Report ===")
     benchmark = summary["benchmark"]
@@ -1051,6 +1506,7 @@ def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
     retrieval = summary["retrieval"]
     citation = summary["citation"]
     faithfulness = summary["faithfulness_rubric"]
+    honesty = summary.get("evaluation_honesty", {}) or {}
 
     print(
         f"Ran {benchmark['case_count']} cases across {benchmark['repo_count']} repos "
@@ -1065,12 +1521,18 @@ def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
             print(f"ERROR   {s.case_id}  ({s.elapsed_seconds:.1f}s)  {s.error}")
         elif s.passed:
             num_checks = len(s.checks)
-            print(f"PASSED  {s.case_id}  ({s.elapsed_seconds:.1f}s)  [all {num_checks} checks passed]")
+            non_trivial = sum(1 for name in s.checks if name not in _TRIVIAL_CHECK_NAMES)
+            note = "" if non_trivial else " [TRIVIAL CHECKS ONLY]"
+            print(
+                f"PASSED  {s.case_id}  ({s.elapsed_seconds:.1f}s)  "
+                f"[all {num_checks} checks passed]{note}"
+            )
         else:
             failed_checks = [name for name, ok in s.checks.items() if not ok]
             print(f"FAILED  {s.case_id}  ({s.elapsed_seconds:.1f}s)  [{', '.join(failed_checks)}]")
 
     print()
+    print("--- Pass/fail ---")
     skipped_count = counts.get("skipped", 0)
     skipped_suffix = f", {skipped_count} skipped" if skipped_count else ""
     print(
@@ -1078,71 +1540,144 @@ def print_report(scores: list[CaseScore], summary: dict[str, Any]) -> None:
         f"{counts['passed']} passed, {counts['failed']} failed, "
         f"{counts['errors']} errors{skipped_suffix} out of {counts['total']} total"
     )
-    print(f"Pass rate: {(summary['pass_rate'] or 0.0) * 100:.1f}%")
-    if retrieval["accuracy"] is None:
-        print("Retrieval accuracy: n/a (no gold retrieval targets were specified)")
+    pass_rate = summary.get("pass_rate")
+    if pass_rate is None:
+        print("Pass rate: n/a")
+    else:
+        print(f"Pass rate: {pass_rate * 100:.1f}%")
+    non_trivial = summary.get("non_trivial_pass_rate")
+    nt_passed = counts.get("non_trivial_passed", 0)
+    nt_ran = counts.get("non_trivial_ran", 0)
+    if non_trivial is None:
+        print("Non-trivial pass rate: n/a (no cases carried non-plumbing checks)")
     else:
         print(
-            f"Retrieval accuracy: {retrieval['accuracy'] * 100:.1f}% "
-            f"({retrieval['matched_count']}/{retrieval['target_count']} expected targets)"
+            f"Non-trivial pass rate: {non_trivial * 100:.1f}% "
+            f"({nt_passed}/{nt_ran} cases with at least one non-plumbing check)"
+        )
+    trivial_ids = honesty.get("trivial_check_case_ids") or []
+    if trivial_ids:
+        print(f"Trivial-checks-only cases: {len(trivial_ids)} -> {', '.join(trivial_ids)}")
+
+    print()
+    print("--- Evidence retrieval ---")
+    cases_with_targets = retrieval.get("cases_with_targets", 0)
+    if retrieval["accuracy"] is None:
+        print(
+            "Recall: n/a (no gold retrieval targets were specified — "
+            f"0/{counts.get('total', 0)} ran cases contributed)"
+        )
+    else:
+        print(
+            f"Recall: {retrieval['accuracy'] * 100:.1f}% "
+            f"({retrieval['matched_count']}/{retrieval['target_count']} targets, "
+            f"{cases_with_targets} cases contributed)"
         )
     if retrieval.get("commit_sha_accuracy") is not None:
         print(
             f"Commit SHA match rate: {retrieval['commit_sha_accuracy'] * 100:.1f}% "
             f"({retrieval['commit_sha_matches']}/{retrieval['commit_sha_total']} expected SHAs)"
         )
+    must_cases = retrieval.get("must_abstain_cases", 0)
+    must_passed = retrieval.get("must_abstain_passed", 0)
+    must_precision = retrieval.get("must_abstain_precision")
+    if must_precision is None:
+        print("Must-abstain precision: n/a (no must-abstain cases)")
+    else:
+        print(
+            f"Must-abstain precision: {must_precision * 100:.1f}% "
+            f"({must_passed}/{must_cases} cases returned zero PR/issue noise, "
+            f"total stray PRs={retrieval.get('unexpected_prs_total', 0)}, "
+            f"stray issues={retrieval.get('unexpected_issues_total', 0)})"
+        )
+
+    print()
+    print("--- Format compliance (NOT honesty) ---")
     if citation["coverage"] is None:
         print("Citation coverage: n/a (no citable explanation sentences)")
     else:
         print(
             f"Citation coverage: {citation['coverage'] * 100:.1f}% "
-            f"({citation['cited_sentence_count']}/{citation['citable_sentence_count']} sentences)"
+            f"({citation['cited_sentence_count']}/{citation['citable_sentence_count']} sentences) "
+            "-- near-100% by construction, the prompt enforces it."
         )
     if citation["validity"] is None:
-        print("Citation validity: n/a (no citations present)")
+        print("Citation ID validity: n/a (no citations present)")
     else:
         print(
-            f"Citation validity: {citation['validity'] * 100:.1f}% "
-            f"({citation['valid_citation_count']}/{citation['citation_count']} citations)"
+            f"Citation ID validity: {citation['validity'] * 100:.1f}% "
+            f"({citation['valid_citation_count']}/{citation['citation_count']} IDs "
+            "exist in returned evidence)."
+        )
+
+    print()
+    print("--- Explanation honesty ---")
+    support = citation.get("support_rate")
+    if support is None:
+        print("Citation semantic support: n/a (no citations present)")
+    else:
+        print(
+            f"Citation semantic support: {support * 100:.1f}% "
+            f"({citation['supported_citation_count']}/{citation['citation_count']} "
+            "citations share a content word with their sentence — weak signal, not entailment)."
+        )
+    llm_judge = summary.get("llm_judge")
+    if llm_judge is not None and llm_judge.get("scored_count", 0) > 0:
+        passing = llm_judge["accurate_count"] + llm_judge["partially_accurate_count"]
+        print(
+            f"LLM-judge faithfulness (HEADLINE): "
+            f"{llm_judge['pass_rate'] * 100:.1f}% pass "
+            f"({passing}/{llm_judge['scored_count']} accurate-or-partial), "
+            f"strict {llm_judge['strict_pass_rate'] * 100:.1f}% "
+            f"({llm_judge['accurate_count']} fully accurate)."
+        )
+        print(
+            f"  breakdown: accurate={llm_judge['accurate_count']}  "
+            f"partially_accurate={llm_judge['partially_accurate_count']}  "
+            f"hallucinated={llm_judge['hallucinated_count']}  "
+            f"unscored={llm_judge['unscored_count']}  skipped={llm_judge['skipped_count']}"
+        )
+    elif llm_judge is not None:
+        # Judge was invoked but every call failed (e.g., daily quota burned).
+        # Surface that honestly so the absence of a headline number is not
+        # misread as "we did not check".
+        print(
+            "LLM-judge faithfulness: ATTEMPTED BUT ALL CALLS FAILED. "
+            f"Unscored {llm_judge['unscored_count']}, "
+            f"skipped {llm_judge['skipped_count']}, "
+            f"scored 0. The proxy rubric below is NOT a substitute; re-run "
+            "after the judge model's quota resets (or use a different judge)."
+        )
+    else:
+        print(
+            "LLM-judge faithfulness: not run. "
+            "Re-run with --use-llm-judge to get a headline honesty number; "
+            "the proxy rubric below is NOT a substitute."
         )
     if faithfulness["average"] is not None:
         print(
-            f"Faithfulness rubric ({faithfulness['mode']}): "
-            f"{faithfulness['average']:.2f}/5.00"
+            f"Faithfulness proxy score (PROXY — not ground truth): "
+            f"{faithfulness['average']:.2f}/5.00 "
+            f"({faithfulness['case_count']}/{faithfulness['case_count'] + faithfulness['unscored_case_count']} cases scored)"
         )
-    llm_judge = summary.get("llm_judge")
-    if llm_judge is not None:
-        print()
-        print("LLM-as-judge faithfulness:")
-        print(
-            f"  accurate: {llm_judge['accurate_count']}  "
-            f"partially accurate: {llm_judge['partially_accurate_count']}  "
-            f"hallucinated: {llm_judge['hallucinated_count']}"
-        )
-        print(
-            f"  unscored: {llm_judge['unscored_count']}  "
-            f"skipped: {llm_judge['skipped_count']}"
-        )
-        if llm_judge["pass_rate"] is None:
-            print(
-                "  Pass rate: n/a "
-                f"(0/{llm_judge['scored_count']} scored; "
-                f"{llm_judge['skipped_count']} skipped, "
-                f"{llm_judge['unscored_count']} unscored)"
-            )
-        else:
-            passing = llm_judge["accurate_count"] + llm_judge["partially_accurate_count"]
-            print(
-                f"  Pass rate: {llm_judge['pass_rate'] * 100:.1f}% "
-                f"({passing}/{llm_judge['scored_count']} scored cases "
-                f"rated accurate or partially accurate)"
-            )
+    else:
+        print("Faithfulness proxy score: n/a (no case produced a measurable proxy).")
+
     if latency["average_seconds"] is not None:
+        print()
+        print("--- Latency ---")
         print(
             f"Latency: avg {latency['average_seconds']:.2f}s | "
             f"p50 {latency['p50_seconds']:.2f}s | "
             f"p95 {latency['p95_seconds']:.2f}s"
         )
+
+    caveats = honesty.get("caveats") or []
+    if caveats:
+        print()
+        print("--- What these numbers do NOT prove ---")
+        for caveat in caveats:
+            print(f"  - {caveat}")
 
 
 def save_results(scores: list[CaseScore], summary: dict[str, Any], path: Path) -> None:
@@ -1208,6 +1743,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-llm-judge",
+        action="store_true",
+        default=False,
+        help=(
+            "Opt out of the LLM-as-judge pass even if an LLM is available. "
+            "Overrides the default-on behavior and implies proxy-only honesty."
+        ),
+    )
+    parser.add_argument(
         "--benchmark-file",
         type=Path,
         default=Path("eval/benchmark.json"),
@@ -1232,6 +1776,29 @@ def main(argv: list[str] | None = None) -> None:
     if not cases:
         print("No cases to run after filtering.")
         sys.exit(0)
+
+    # The LLM judge is the headline honesty metric. Run it by default whenever
+    # any judge LLM is configured, unless --no-llm-judge or --no-llm is passed.
+    # Anthropic Claude is preferred (different model family from the Groq
+    # agent); Groq is the fallback. See _judge_backend.
+    judge_available = judge_anthropic.is_available() or llm.is_available()
+    use_llm_judge = args.use_llm_judge
+    if not args.no_llm_judge and not args.no_llm and judge_available:
+        use_llm_judge = True
+    if args.no_llm_judge:
+        use_llm_judge = False
+    if use_llm_judge and not judge_available:
+        print(
+            "WARNING: --use-llm-judge requested but no judge LLM is configured. "
+            "Set ANTHROPIC_API_KEY (preferred) or GROQ_API_KEY. "
+            "Skipping LLM-judge pass; only the proxy rubric will be reported."
+        )
+        use_llm_judge = False
+    if use_llm_judge:
+        if judge_anthropic.is_available():
+            print(f"LLM-judge backend: anthropic ({judge_anthropic.model_id()})")
+        else:
+            print(f"LLM-judge backend: groq ({llm.config.GROQ_MODEL})")
 
     print(f"Setting up repos for {len(cases)} case(s)...")
     repo_map = setup_repos(cases)
@@ -1259,7 +1826,7 @@ def main(argv: list[str] | None = None) -> None:
             case,
             repo_path,
             no_llm=args.no_llm,
-            use_llm_judge=args.use_llm_judge,
+            use_llm_judge=use_llm_judge,
         )
         scores.append(score)
 
