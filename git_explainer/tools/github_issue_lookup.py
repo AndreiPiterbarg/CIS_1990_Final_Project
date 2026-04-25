@@ -23,7 +23,17 @@ def fetch_issue(
     *,
     memory: Any = None,
 ) -> dict[str, str | int | list[str]] | None:
-    """Fetch a single GitHub issue by number. Returns None if not found."""
+    """Fetch a single GitHub issue by number.
+
+    Returns ``None`` when the number does not exist (404) **or when it
+    refers to a pull request rather than a true issue**. GitHub treats
+    PRs as a subtype of issues and returns them through this endpoint,
+    but they are also surfaced separately via the PR lookup. Without
+    this filter the same artifact appears twice in the agent's evidence
+    (once as a PR, once as an "issue"), which is a real source of
+    misleading explanations on any repo where a commit message
+    references its own PR by number.
+    """
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}"
     resp = _get(url, memory=memory)
 
@@ -41,6 +51,10 @@ def fetch_issue(
         )
 
     data = resp.data or {}
+    # GitHub sets ``pull_request`` on the issue payload iff the number
+    # actually refers to a PR. https://docs.github.com/en/rest/issues
+    if data.get("pull_request"):
+        return None
     return {
         "number": data["number"],
         "title": data["title"],
