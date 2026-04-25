@@ -1,8 +1,12 @@
 {
-  "commit_prs": {},
+  "commit_prs": {
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075": [
+      1
+    ]
+  },
   "contexts": {},
   "diffs": {
-    "3870c34:git_explainer/config.py": {
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/config.py": {
       "files": [
         {
           "additions": 0,
@@ -330,12 +334,1305 @@
       "total_additions": 34,
       "total_deletions": 7,
       "total_files_changed": 2
+    },
+    "50c52bb5e27dc43b87676facc2338d8c0506aa5c:git_explainer/tools/file_context_reader.py": {
+      "files": [
+        {
+          "additions": 0,
+          "deletions": 0,
+          "hunks": [],
+          "is_binary": false,
+          "new_path": "",
+          "old_path": "",
+          "status": "modified"
+        },
+        {
+          "additions": 69,
+          "deletions": 0,
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,69 @@",
+              "lines": [
+                {
+                  "content": "\"\"\"Read file contents from a local Git repository at a specific revision.\"\"\"",
+                  "new_line": 1,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 2,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "import subprocess",
+                  "new_line": 3,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "from pathlib import Path",
+                  "new_line": 4,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 5,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 6,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "def read_file_at_revision(",
+                  "new_line": 7,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    repo_path: str | Path,",
+                  "new_line": 8,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    file_path: str,",
+                  "new_line": 9,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    *,",
+                  "new_line": 10,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    revision: str | None = None,",
+                  "new_line": 11,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    start_line: int | None = None,",
+                  "new_line": 12,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    end_line: int | None = None,",
+                  "new_line": 13,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": ") -> str | None:",
+                  "new_line": 14,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    \"\"\"Return file contents as a string, '[binary file]' for binaries, or None if missing.",
+                  "new_line": 15,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 16,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    Args:",
+                  "new_line": 17,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        repo_path: Path to the local git repository.",
+                  "new_line": 18,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        file_path: File path relative to the repo root.",
+                  "new_line": 19,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        revision: Git revision (SHA, branch, tag, HEAD~N). None reads from working tree.",
+                  "new_line": 20,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        start_line: 1-indexed first line to include (None = from start).",
+                  "new_line": 21,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        end_line: 1-indexed last line to include (None = to end).",
+                  "new_line": 22,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    \"\"\"",
+                  "new_line": 23,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    repo = Path(repo_path)",
+                  "new_line": 24,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    if not (repo / \".git\").exists():",
+                  "new_line": 25,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        raise FileNotFoundError(f\"Not a git repository: {repo}\")",
+                  "new_line": 26,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 27,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    if revision is None:",
+                  "new_line": 28,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        content = _read_from_worktree(repo, file_path)",
+                  "new_line": 29,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    else:",
+                  "new_line": 30,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        content = _read_from_revision(repo, file_path, revision)",
+                  "new_line": 31,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 32,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    if content is None or content == \"[binary file]\":",
+                  "new_line": 33,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        return content",
+                  "new_line": 34,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 35,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    if start_line is not None:",
+                  "new_line": 36,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        lines = content.splitlines(keepends=True)",
+                  "new_line": 37,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        start = max(start_line - 1, 0)",
+                  "new_line": 38,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        lines = lines[start:end_line]",
+                  "new_line": 39,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        content = \"\".join(lines)",
+                  "new_line": 40,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 41,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    return content",
+                  "new_line": 42,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 43,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 44,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "def _read_from_worktree(repo: Path, file_path: str) -> str | None:",
+                  "new_line": 45,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    target = repo / file_path",
+                  "new_line": 46,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    if not target.exists():",
+                  "new_line": 47,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        return None",
+                  "new_line": 48,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    try:",
+                  "new_line": 49,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        return target.read_text(encoding=\"utf-8\")",
+                  "new_line": 50,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    except UnicodeDecodeError:",
+                  "new_line": 51,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        return \"[binary file]\"",
+                  "new_line": 52,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 53,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 54,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "def _read_from_revision(repo: Path, file_path: str, revision: str) -> str | None:",
+                  "new_line": 55,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    result = subprocess.run(",
+                  "new_line": 56,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        [\"git\", \"show\", f\"{revision}:{file_path}\"],",
+                  "new_line": 57,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        capture_output=True,",
+                  "new_line": 58,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        cwd=repo,",
+                  "new_line": 59,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    )",
+                  "new_line": 60,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    if result.returncode != 0:",
+                  "new_line": 61,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        stderr = result.stderr.decode(\"utf-8\", errors=\"replace\")",
+                  "new_line": 62,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        if \"does not exist\" in stderr or \"exists on disk, but not in\" in stderr:",
+                  "new_line": 63,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "            return None",
+                  "new_line": 64,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        raise ValueError(f\"git show failed: {stderr.strip()}\")",
+                  "new_line": 65,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    try:",
+                  "new_line": 66,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        return result.stdout.decode(\"utf-8\")",
+                  "new_line": 67,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    except UnicodeDecodeError:",
+                  "new_line": 68,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "        return \"[binary file]\"",
+                  "new_line": 69,
+                  "old_line": null,
+                  "type": "add"
+                }
+              ],
+              "new_count": 69,
+              "new_start": 1,
+              "old_count": 0,
+              "old_start": 0
+            }
+          ],
+          "is_binary": false,
+          "new_path": "git_explainer/tools/file_context_reader.py",
+          "old_path": "git_explainer/tools/file_context_reader.py",
+          "status": "modified"
+        }
+      ],
+      "total_additions": 69,
+      "total_deletions": 0,
+      "total_files_changed": 2
+    },
+    "e0f2b80dc00ffa2b5bf063c64f490fe3e53b183e:git_explainer/tools/file_context_reader.py": {
+      "files": [
+        {
+          "additions": 0,
+          "deletions": 0,
+          "hunks": [],
+          "is_binary": false,
+          "new_path": "",
+          "old_path": "",
+          "status": "modified"
+        },
+        {
+          "additions": 3,
+          "deletions": 4,
+          "hunks": [
+            {
+              "header": "@@ -46,2 +46,4 @@ def read_file_at_revision(",
+              "lines": [
+                {
+                  "content": "",
+                  "new_line": 46,
+                  "old_line": 46,
+                  "type": "context"
+                },
+                {
+                  "content": "# --- Internal helpers --------------------------------------------------------",
+                  "new_line": 47,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "",
+                  "new_line": 48,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "def _read_from_worktree(repo: Path, file_path: str) -> str | None:",
+                  "new_line": 49,
+                  "old_line": 47,
+                  "type": "context"
+                }
+              ],
+              "new_count": 4,
+              "new_start": 46,
+              "old_count": 2,
+              "old_start": 46
+            },
+            {
+              "header": "@@ -63,6 +65,3 @@ def _read_from_revision(repo: Path, file_path: str, revision: str) -> str | None",
+              "lines": [
+                {
+                  "content": "    if result.returncode != 0:",
+                  "new_line": 65,
+                  "old_line": 63,
+                  "type": "context"
+                },
+                {
+                  "content": "        stderr = result.stderr.decode(\"utf-8\", errors=\"replace\")",
+                  "new_line": null,
+                  "old_line": 64,
+                  "type": "delete"
+                },
+                {
+                  "content": "        if \"does not exist\" in stderr or \"exists on disk, but not in\" in stderr:",
+                  "new_line": null,
+                  "old_line": 65,
+                  "type": "delete"
+                },
+                {
+                  "content": "            return None",
+                  "new_line": null,
+                  "old_line": 66,
+                  "type": "delete"
+                },
+                {
+                  "content": "        raise ValueError(f\"git show failed: {stderr.strip()}\")",
+                  "new_line": null,
+                  "old_line": 67,
+                  "type": "delete"
+                },
+                {
+                  "content": "        return None",
+                  "new_line": 66,
+                  "old_line": null,
+                  "type": "add"
+                },
+                {
+                  "content": "    try:",
+                  "new_line": 67,
+                  "old_line": 68,
+                  "type": "context"
+                }
+              ],
+              "new_count": 3,
+              "new_start": 65,
+              "old_count": 6,
+              "old_start": 63
+            }
+          ],
+          "is_binary": false,
+          "new_path": "git_explainer/tools/file_context_reader.py",
+          "old_path": "git_explainer/tools/file_context_reader.py",
+          "status": "modified"
+        }
+      ],
+      "total_additions": 3,
+      "total_deletions": 4,
+      "total_files_changed": 2
     }
   },
-  "etags": {},
+  "etags": {
+    "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits/3870c344c0ff5b8da56a85dc8a9a896bfa7bb075/pulls": {
+      "data": [
+        {
+          "_links": {
+            "comments": {
+              "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1/comments"
+            },
+            "commits": {
+              "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/commits"
+            },
+            "html": {
+              "href": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1"
+            },
+            "issue": {
+              "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1"
+            },
+            "review_comment": {
+              "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/comments{/number}"
+            },
+            "review_comments": {
+              "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/comments"
+            },
+            "self": {
+              "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1"
+            },
+            "statuses": {
+              "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/3870c344c0ff5b8da56a85dc8a9a896bfa7bb075"
+            }
+          },
+          "active_lock_reason": null,
+          "assignee": null,
+          "assignees": [],
+          "author_association": "COLLABORATOR",
+          "auto_merge": null,
+          "base": {
+            "label": "AndreiPiterbarg:master",
+            "ref": "master",
+            "repo": {
+              "allow_forking": true,
+              "archive_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/{archive_format}{/ref}",
+              "archived": false,
+              "assignees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/assignees{/user}",
+              "blobs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/blobs{/sha}",
+              "branches_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/branches{/branch}",
+              "clone_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+              "collaborators_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/collaborators{/collaborator}",
+              "comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/comments{/number}",
+              "commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits{/sha}",
+              "compare_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/compare/{base}...{head}",
+              "contents_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contents/{+path}",
+              "contributors_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contributors",
+              "created_at": "2026-03-25T12:12:36Z",
+              "default_branch": "master",
+              "deployments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/deployments",
+              "description": null,
+              "disabled": false,
+              "downloads_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/downloads",
+              "events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/events",
+              "fork": false,
+              "forks": 0,
+              "forks_count": 0,
+              "forks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/forks",
+              "full_name": "AndreiPiterbarg/CIS_1990_Final_Project",
+              "git_commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/commits{/sha}",
+              "git_refs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/refs{/sha}",
+              "git_tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/tags{/sha}",
+              "git_url": "git://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+              "has_discussions": false,
+              "has_downloads": true,
+              "has_issues": true,
+              "has_pages": false,
+              "has_projects": true,
+              "has_pull_requests": true,
+              "has_wiki": true,
+              "homepage": null,
+              "hooks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/hooks",
+              "html_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+              "id": 1191606667,
+              "is_template": false,
+              "issue_comment_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/comments{/number}",
+              "issue_events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/events{/number}",
+              "issues_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues{/number}",
+              "keys_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/keys{/key_id}",
+              "labels_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/labels{/name}",
+              "language": "Python",
+              "languages_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/languages",
+              "license": null,
+              "merges_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/merges",
+              "milestones_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/milestones{/number}",
+              "mirror_url": null,
+              "name": "CIS_1990_Final_Project",
+              "node_id": "R_kgDORwZ5iw",
+              "notifications_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/notifications{?since,all,participating}",
+              "open_issues": 0,
+              "open_issues_count": 0,
+              "owner": {
+                "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+                "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+                "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+                "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+                "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+                "gravatar_id": "",
+                "html_url": "https://github.com/AndreiPiterbarg",
+                "id": 65182913,
+                "login": "AndreiPiterbarg",
+                "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+                "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+                "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+                "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+                "site_admin": false,
+                "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+                "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+                "type": "User",
+                "url": "https://api.github.com/users/AndreiPiterbarg",
+                "user_view_type": "public"
+              },
+              "private": false,
+              "pull_request_creation_policy": "all",
+              "pulls_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls{/number}",
+              "pushed_at": "2026-04-25T21:10:40Z",
+              "releases_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/releases{/id}",
+              "size": 1249,
+              "ssh_url": "git@github.com:AndreiPiterbarg/CIS_1990_Final_Project.git",
+              "stargazers_count": 0,
+              "stargazers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/stargazers",
+              "statuses_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/{sha}",
+              "subscribers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscribers",
+              "subscription_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscription",
+              "svn_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+              "tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/tags",
+              "teams_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/teams",
+              "topics": [],
+              "trees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/trees{/sha}",
+              "updated_at": "2026-04-25T21:10:44Z",
+              "url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project",
+              "visibility": "public",
+              "watchers": 0,
+              "watchers_count": 0,
+              "web_commit_signoff_required": false
+            },
+            "sha": "a537a6a382b3d29e4eaaa0af4ee5e4d013689177",
+            "user": {
+              "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+              "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+              "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+              "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+              "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+              "gravatar_id": "",
+              "html_url": "https://github.com/AndreiPiterbarg",
+              "id": 65182913,
+              "login": "AndreiPiterbarg",
+              "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+              "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+              "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+              "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+              "site_admin": false,
+              "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+              "type": "User",
+              "url": "https://api.github.com/users/AndreiPiterbarg",
+              "user_view_type": "public"
+            }
+          },
+          "body": "Do not merge yet -- still needs some edits/review",
+          "closed_at": "2026-04-14T21:13:26Z",
+          "comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1/comments",
+          "commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/commits",
+          "created_at": "2026-04-14T05:55:42Z",
+          "diff_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1.diff",
+          "draft": false,
+          "head": {
+            "label": "AndreiPiterbarg:agentv1",
+            "ref": "agentv1",
+            "repo": {
+              "allow_forking": true,
+              "archive_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/{archive_format}{/ref}",
+              "archived": false,
+              "assignees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/assignees{/user}",
+              "blobs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/blobs{/sha}",
+              "branches_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/branches{/branch}",
+              "clone_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+              "collaborators_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/collaborators{/collaborator}",
+              "comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/comments{/number}",
+              "commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits{/sha}",
+              "compare_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/compare/{base}...{head}",
+              "contents_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contents/{+path}",
+              "contributors_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contributors",
+              "created_at": "2026-03-25T12:12:36Z",
+              "default_branch": "master",
+              "deployments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/deployments",
+              "description": null,
+              "disabled": false,
+              "downloads_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/downloads",
+              "events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/events",
+              "fork": false,
+              "forks": 0,
+              "forks_count": 0,
+              "forks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/forks",
+              "full_name": "AndreiPiterbarg/CIS_1990_Final_Project",
+              "git_commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/commits{/sha}",
+              "git_refs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/refs{/sha}",
+              "git_tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/tags{/sha}",
+              "git_url": "git://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+              "has_discussions": false,
+              "has_downloads": true,
+              "has_issues": true,
+              "has_pages": false,
+              "has_projects": true,
+              "has_pull_requests": true,
+              "has_wiki": true,
+              "homepage": null,
+              "hooks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/hooks",
+              "html_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+              "id": 1191606667,
+              "is_template": false,
+              "issue_comment_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/comments{/number}",
+              "issue_events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/events{/number}",
+              "issues_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues{/number}",
+              "keys_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/keys{/key_id}",
+              "labels_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/labels{/name}",
+              "language": "Python",
+              "languages_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/languages",
+              "license": null,
+              "merges_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/merges",
+              "milestones_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/milestones{/number}",
+              "mirror_url": null,
+              "name": "CIS_1990_Final_Project",
+              "node_id": "R_kgDORwZ5iw",
+              "notifications_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/notifications{?since,all,participating}",
+              "open_issues": 0,
+              "open_issues_count": 0,
+              "owner": {
+                "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+                "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+                "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+                "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+                "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+                "gravatar_id": "",
+                "html_url": "https://github.com/AndreiPiterbarg",
+                "id": 65182913,
+                "login": "AndreiPiterbarg",
+                "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+                "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+                "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+                "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+                "site_admin": false,
+                "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+                "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+                "type": "User",
+                "url": "https://api.github.com/users/AndreiPiterbarg",
+                "user_view_type": "public"
+              },
+              "private": false,
+              "pull_request_creation_policy": "all",
+              "pulls_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls{/number}",
+              "pushed_at": "2026-04-25T21:10:40Z",
+              "releases_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/releases{/id}",
+              "size": 1249,
+              "ssh_url": "git@github.com:AndreiPiterbarg/CIS_1990_Final_Project.git",
+              "stargazers_count": 0,
+              "stargazers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/stargazers",
+              "statuses_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/{sha}",
+              "subscribers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscribers",
+              "subscription_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscription",
+              "svn_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+              "tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/tags",
+              "teams_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/teams",
+              "topics": [],
+              "trees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/trees{/sha}",
+              "updated_at": "2026-04-25T21:10:44Z",
+              "url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project",
+              "visibility": "public",
+              "watchers": 0,
+              "watchers_count": 0,
+              "web_commit_signoff_required": false
+            },
+            "sha": "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075",
+            "user": {
+              "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+              "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+              "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+              "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+              "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+              "gravatar_id": "",
+              "html_url": "https://github.com/AndreiPiterbarg",
+              "id": 65182913,
+              "login": "AndreiPiterbarg",
+              "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+              "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+              "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+              "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+              "site_admin": false,
+              "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+              "type": "User",
+              "url": "https://api.github.com/users/AndreiPiterbarg",
+              "user_view_type": "public"
+            }
+          },
+          "html_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1",
+          "id": 3526700741,
+          "issue_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1",
+          "labels": [],
+          "locked": false,
+          "merge_commit_sha": "6d82e7ee9c8739060c02bb5586379566a27a00f7",
+          "merged_at": "2026-04-14T21:13:26Z",
+          "milestone": null,
+          "node_id": "PR_kwDORwZ5i87SNS7F",
+          "number": 1,
+          "patch_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1.patch",
+          "requested_reviewers": [],
+          "requested_teams": [],
+          "review_comment_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/comments{/number}",
+          "review_comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/comments",
+          "state": "closed",
+          "statuses_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/3870c344c0ff5b8da56a85dc8a9a896bfa7bb075",
+          "title": "initial mockup",
+          "updated_at": "2026-04-14T21:13:26Z",
+          "url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1",
+          "user": {
+            "avatar_url": "https://avatars.githubusercontent.com/u/40585014?v=4",
+            "events_url": "https://api.github.com/users/aking526/events{/privacy}",
+            "followers_url": "https://api.github.com/users/aking526/followers",
+            "following_url": "https://api.github.com/users/aking526/following{/other_user}",
+            "gists_url": "https://api.github.com/users/aking526/gists{/gist_id}",
+            "gravatar_id": "",
+            "html_url": "https://github.com/aking526",
+            "id": 40585014,
+            "login": "aking526",
+            "node_id": "MDQ6VXNlcjQwNTg1MDE0",
+            "organizations_url": "https://api.github.com/users/aking526/orgs",
+            "received_events_url": "https://api.github.com/users/aking526/received_events",
+            "repos_url": "https://api.github.com/users/aking526/repos",
+            "site_admin": false,
+            "starred_url": "https://api.github.com/users/aking526/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/aking526/subscriptions",
+            "type": "User",
+            "url": "https://api.github.com/users/aking526",
+            "user_view_type": "public"
+          }
+        }
+      ],
+      "etag": "W/\"d45e6851993a079c8b0221b6452684ec65c7e7df7420fbbc35bc07149e7358b9\"",
+      "last_fetched": 1777154092.527574
+    },
+    "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1": {
+      "data": {
+        "_links": {
+          "comments": {
+            "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1/comments"
+          },
+          "commits": {
+            "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/commits"
+          },
+          "html": {
+            "href": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1"
+          },
+          "issue": {
+            "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1"
+          },
+          "review_comment": {
+            "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/comments{/number}"
+          },
+          "review_comments": {
+            "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/comments"
+          },
+          "self": {
+            "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1"
+          },
+          "statuses": {
+            "href": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/3870c344c0ff5b8da56a85dc8a9a896bfa7bb075"
+          }
+        },
+        "active_lock_reason": null,
+        "additions": 1161,
+        "assignee": null,
+        "assignees": [],
+        "author_association": "COLLABORATOR",
+        "auto_merge": null,
+        "base": {
+          "label": "AndreiPiterbarg:master",
+          "ref": "master",
+          "repo": {
+            "allow_forking": true,
+            "archive_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/{archive_format}{/ref}",
+            "archived": false,
+            "assignees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/assignees{/user}",
+            "blobs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/blobs{/sha}",
+            "branches_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/branches{/branch}",
+            "clone_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+            "collaborators_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/collaborators{/collaborator}",
+            "comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/comments{/number}",
+            "commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits{/sha}",
+            "compare_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/compare/{base}...{head}",
+            "contents_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contents/{+path}",
+            "contributors_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contributors",
+            "created_at": "2026-03-25T12:12:36Z",
+            "default_branch": "master",
+            "deployments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/deployments",
+            "description": null,
+            "disabled": false,
+            "downloads_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/downloads",
+            "events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/events",
+            "fork": false,
+            "forks": 0,
+            "forks_count": 0,
+            "forks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/forks",
+            "full_name": "AndreiPiterbarg/CIS_1990_Final_Project",
+            "git_commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/commits{/sha}",
+            "git_refs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/refs{/sha}",
+            "git_tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/tags{/sha}",
+            "git_url": "git://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+            "has_discussions": false,
+            "has_downloads": true,
+            "has_issues": true,
+            "has_pages": false,
+            "has_projects": true,
+            "has_pull_requests": true,
+            "has_wiki": true,
+            "homepage": null,
+            "hooks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/hooks",
+            "html_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+            "id": 1191606667,
+            "is_template": false,
+            "issue_comment_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/comments{/number}",
+            "issue_events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/events{/number}",
+            "issues_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues{/number}",
+            "keys_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/keys{/key_id}",
+            "labels_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/labels{/name}",
+            "language": "Python",
+            "languages_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/languages",
+            "license": null,
+            "merges_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/merges",
+            "milestones_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/milestones{/number}",
+            "mirror_url": null,
+            "name": "CIS_1990_Final_Project",
+            "node_id": "R_kgDORwZ5iw",
+            "notifications_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/notifications{?since,all,participating}",
+            "open_issues": 0,
+            "open_issues_count": 0,
+            "owner": {
+              "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+              "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+              "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+              "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+              "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+              "gravatar_id": "",
+              "html_url": "https://github.com/AndreiPiterbarg",
+              "id": 65182913,
+              "login": "AndreiPiterbarg",
+              "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+              "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+              "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+              "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+              "site_admin": false,
+              "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+              "type": "User",
+              "url": "https://api.github.com/users/AndreiPiterbarg",
+              "user_view_type": "public"
+            },
+            "private": false,
+            "pull_request_creation_policy": "all",
+            "pulls_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls{/number}",
+            "pushed_at": "2026-04-25T21:10:40Z",
+            "releases_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/releases{/id}",
+            "size": 1249,
+            "ssh_url": "git@github.com:AndreiPiterbarg/CIS_1990_Final_Project.git",
+            "stargazers_count": 0,
+            "stargazers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/stargazers",
+            "statuses_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/{sha}",
+            "subscribers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscribers",
+            "subscription_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscription",
+            "svn_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+            "tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/tags",
+            "teams_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/teams",
+            "topics": [],
+            "trees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/trees{/sha}",
+            "updated_at": "2026-04-25T21:10:44Z",
+            "url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project",
+            "visibility": "public",
+            "watchers": 0,
+            "watchers_count": 0,
+            "web_commit_signoff_required": false
+          },
+          "sha": "a537a6a382b3d29e4eaaa0af4ee5e4d013689177",
+          "user": {
+            "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+            "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+            "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+            "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+            "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+            "gravatar_id": "",
+            "html_url": "https://github.com/AndreiPiterbarg",
+            "id": 65182913,
+            "login": "AndreiPiterbarg",
+            "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+            "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+            "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+            "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+            "site_admin": false,
+            "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+            "type": "User",
+            "url": "https://api.github.com/users/AndreiPiterbarg",
+            "user_view_type": "public"
+          }
+        },
+        "body": "Do not merge yet -- still needs some edits/review",
+        "changed_files": 17,
+        "closed_at": "2026-04-14T21:13:26Z",
+        "comments": 0,
+        "comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1/comments",
+        "commits": 1,
+        "commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/commits",
+        "created_at": "2026-04-14T05:55:42Z",
+        "deletions": 32,
+        "diff_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1.diff",
+        "draft": false,
+        "head": {
+          "label": "AndreiPiterbarg:agentv1",
+          "ref": "agentv1",
+          "repo": {
+            "allow_forking": true,
+            "archive_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/{archive_format}{/ref}",
+            "archived": false,
+            "assignees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/assignees{/user}",
+            "blobs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/blobs{/sha}",
+            "branches_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/branches{/branch}",
+            "clone_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+            "collaborators_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/collaborators{/collaborator}",
+            "comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/comments{/number}",
+            "commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits{/sha}",
+            "compare_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/compare/{base}...{head}",
+            "contents_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contents/{+path}",
+            "contributors_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/contributors",
+            "created_at": "2026-03-25T12:12:36Z",
+            "default_branch": "master",
+            "deployments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/deployments",
+            "description": null,
+            "disabled": false,
+            "downloads_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/downloads",
+            "events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/events",
+            "fork": false,
+            "forks": 0,
+            "forks_count": 0,
+            "forks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/forks",
+            "full_name": "AndreiPiterbarg/CIS_1990_Final_Project",
+            "git_commits_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/commits{/sha}",
+            "git_refs_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/refs{/sha}",
+            "git_tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/tags{/sha}",
+            "git_url": "git://github.com/AndreiPiterbarg/CIS_1990_Final_Project.git",
+            "has_discussions": false,
+            "has_downloads": true,
+            "has_issues": true,
+            "has_pages": false,
+            "has_projects": true,
+            "has_pull_requests": true,
+            "has_wiki": true,
+            "homepage": null,
+            "hooks_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/hooks",
+            "html_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+            "id": 1191606667,
+            "is_template": false,
+            "issue_comment_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/comments{/number}",
+            "issue_events_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/events{/number}",
+            "issues_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues{/number}",
+            "keys_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/keys{/key_id}",
+            "labels_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/labels{/name}",
+            "language": "Python",
+            "languages_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/languages",
+            "license": null,
+            "merges_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/merges",
+            "milestones_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/milestones{/number}",
+            "mirror_url": null,
+            "name": "CIS_1990_Final_Project",
+            "node_id": "R_kgDORwZ5iw",
+            "notifications_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/notifications{?since,all,participating}",
+            "open_issues": 0,
+            "open_issues_count": 0,
+            "owner": {
+              "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+              "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+              "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+              "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+              "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+              "gravatar_id": "",
+              "html_url": "https://github.com/AndreiPiterbarg",
+              "id": 65182913,
+              "login": "AndreiPiterbarg",
+              "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+              "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+              "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+              "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+              "site_admin": false,
+              "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+              "type": "User",
+              "url": "https://api.github.com/users/AndreiPiterbarg",
+              "user_view_type": "public"
+            },
+            "private": false,
+            "pull_request_creation_policy": "all",
+            "pulls_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls{/number}",
+            "pushed_at": "2026-04-25T21:10:40Z",
+            "releases_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/releases{/id}",
+            "size": 1249,
+            "ssh_url": "git@github.com:AndreiPiterbarg/CIS_1990_Final_Project.git",
+            "stargazers_count": 0,
+            "stargazers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/stargazers",
+            "statuses_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/{sha}",
+            "subscribers_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscribers",
+            "subscription_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/subscription",
+            "svn_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project",
+            "tags_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/tags",
+            "teams_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/teams",
+            "topics": [],
+            "trees_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/git/trees{/sha}",
+            "updated_at": "2026-04-25T21:10:44Z",
+            "url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project",
+            "visibility": "public",
+            "watchers": 0,
+            "watchers_count": 0,
+            "web_commit_signoff_required": false
+          },
+          "sha": "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075",
+          "user": {
+            "avatar_url": "https://avatars.githubusercontent.com/u/65182913?v=4",
+            "events_url": "https://api.github.com/users/AndreiPiterbarg/events{/privacy}",
+            "followers_url": "https://api.github.com/users/AndreiPiterbarg/followers",
+            "following_url": "https://api.github.com/users/AndreiPiterbarg/following{/other_user}",
+            "gists_url": "https://api.github.com/users/AndreiPiterbarg/gists{/gist_id}",
+            "gravatar_id": "",
+            "html_url": "https://github.com/AndreiPiterbarg",
+            "id": 65182913,
+            "login": "AndreiPiterbarg",
+            "node_id": "MDQ6VXNlcjY1MTgyOTEz",
+            "organizations_url": "https://api.github.com/users/AndreiPiterbarg/orgs",
+            "received_events_url": "https://api.github.com/users/AndreiPiterbarg/received_events",
+            "repos_url": "https://api.github.com/users/AndreiPiterbarg/repos",
+            "site_admin": false,
+            "starred_url": "https://api.github.com/users/AndreiPiterbarg/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/AndreiPiterbarg/subscriptions",
+            "type": "User",
+            "url": "https://api.github.com/users/AndreiPiterbarg",
+            "user_view_type": "public"
+          }
+        },
+        "html_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1",
+        "id": 3526700741,
+        "issue_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/issues/1",
+        "labels": [],
+        "locked": false,
+        "maintainer_can_modify": false,
+        "merge_commit_sha": "6d82e7ee9c8739060c02bb5586379566a27a00f7",
+        "mergeable": null,
+        "mergeable_state": "unknown",
+        "merged": true,
+        "merged_at": "2026-04-14T21:13:26Z",
+        "merged_by": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/40585014?v=4",
+          "events_url": "https://api.github.com/users/aking526/events{/privacy}",
+          "followers_url": "https://api.github.com/users/aking526/followers",
+          "following_url": "https://api.github.com/users/aking526/following{/other_user}",
+          "gists_url": "https://api.github.com/users/aking526/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/aking526",
+          "id": 40585014,
+          "login": "aking526",
+          "node_id": "MDQ6VXNlcjQwNTg1MDE0",
+          "organizations_url": "https://api.github.com/users/aking526/orgs",
+          "received_events_url": "https://api.github.com/users/aking526/received_events",
+          "repos_url": "https://api.github.com/users/aking526/repos",
+          "site_admin": false,
+          "starred_url": "https://api.github.com/users/aking526/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/aking526/subscriptions",
+          "type": "User",
+          "url": "https://api.github.com/users/aking526",
+          "user_view_type": "public"
+        },
+        "milestone": null,
+        "node_id": "PR_kwDORwZ5i87SNS7F",
+        "number": 1,
+        "patch_url": "https://github.com/AndreiPiterbarg/CIS_1990_Final_Project/pull/1.patch",
+        "rebaseable": null,
+        "requested_reviewers": [],
+        "requested_teams": [],
+        "review_comment_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/comments{/number}",
+        "review_comments": 0,
+        "review_comments_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/comments",
+        "state": "closed",
+        "statuses_url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/statuses/3870c344c0ff5b8da56a85dc8a9a896bfa7bb075",
+        "title": "initial mockup",
+        "updated_at": "2026-04-14T21:13:26Z",
+        "url": "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1",
+        "user": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/40585014?v=4",
+          "events_url": "https://api.github.com/users/aking526/events{/privacy}",
+          "followers_url": "https://api.github.com/users/aking526/followers",
+          "following_url": "https://api.github.com/users/aking526/following{/other_user}",
+          "gists_url": "https://api.github.com/users/aking526/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/aking526",
+          "id": 40585014,
+          "login": "aking526",
+          "node_id": "MDQ6VXNlcjQwNTg1MDE0",
+          "organizations_url": "https://api.github.com/users/aking526/orgs",
+          "received_events_url": "https://api.github.com/users/aking526/received_events",
+          "repos_url": "https://api.github.com/users/aking526/repos",
+          "site_admin": false,
+          "starred_url": "https://api.github.com/users/aking526/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/aking526/subscriptions",
+          "type": "User",
+          "url": "https://api.github.com/users/aking526",
+          "user_view_type": "public"
+        }
+      },
+      "etag": "W/\"32783e22893b897375e31bf1f9cd52d52888a19b38fb2007da17c7012cd06b9d\"",
+      "last_fetched": 1777154093.0462122
+    }
+  },
   "issue_comments": {},
   "issues": {},
   "pr_comments": {},
-  "prs": {},
+  "prs": {
+    "1": {
+      "base_branch": "master",
+      "body": "Do not merge yet -- still needs some edits/review",
+      "created_at": "2026-04-14T05:55:42Z",
+      "head_branch": "agentv1",
+      "merge_commit_sha": "6d82e7ee9c8739060c02bb5586379566a27a00f7",
+      "merged_at": "2026-04-14T21:13:26Z",
+      "number": 1,
+      "state": "merged",
+      "title": "initial mockup",
+      "user": "aking526"
+    }
+  },
   "version": 1
 }

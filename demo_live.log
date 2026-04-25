@@ -1,0 +1,295 @@
+
+##########################################################################################
+  GIT HISTORY EXPLAINER -- LIVE CLASS DEMO
+##########################################################################################
+
+Architecture: 3-LLM agentic pipeline. Layer 1 PLANNER decides which deterministic
+git/GitHub tools to invoke. Layer 2 SYNTHESIZER writes the cited explanation prose. Layer
+3 CRITIC (independent provider) grades the draft and may trigger one re-plan + re-
+synthesis round.
+
+Demo mode: Planner and Synthesizer use deterministic scripted responses (the actual
+production code paths run unchanged -- only the LLM brain is canned for reliability).
+Critic is LIVE: real Anthropic Claude Haiku 4.5 over the wire.
+
+==========================================================================================
+  DEMO 1: config.py:13-19  ('Why these credential lines?')
+==========================================================================================
+   - repo                   CIS_1990_Final_Project
+   - file                   git_explainer/config.py
+   - lines                  13-19
+   - github                 AndreiPiterbarg/CIS_1990_Final_Project
+   - flags                  use_llm + use_planner + use_critic
+   - LLM mode               scripted Planner+Synth, LIVE Anthropic Critic
+
+>>> STEP 1: PLANNER -> Groq llama-3.1-8b-instant
+------------------------------------------------------------------------------------------
+   [PLANNER prompt (key fragment)]
+    Iteration 1 of 10.
+    Evidence collected so far:
+    {
+      "candidate_issue_refs": [],
+      "candidate_pr_numbers": [],
+      "commits": [
+        {
+          "date": "2026-04-14",
+          "message": "initial mockup",
+          "sha": "3870c34"
+        },
+        {
+          "date": "2026-04-11",
+          "message": "Switch LLM provider from Kimi to Groq",
+          "sha": "4c711bf"
+        },
+        {
+          "date": "2026-04-09",
+          "message": "Add project configuration and dependencies",
+          "sha": "628ef3c"
+        }
+      ],
+      "diffs": [],
+      "file_contexts": [],
+      "issues": [],
+      "pull_requests": []
+    }
+   [PLANNER reply]
+    {"action": "call_tool", "tool": "find_prs_for_commit", "arguments": {"commit_sha": "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075"}, "reasoning": "The seeded commits include 3870c34 'initial mockup'. Look up its PR for design rationale."}
+
+>>> STEP 2: PLANNER -> Groq llama-3.1-8b-instant
+------------------------------------------------------------------------------------------
+   [PLANNER prompt (key fragment)]
+    Iteration 2 of 10.
+    Evidence collected so far:
+    {
+      "candidate_issue_refs": [],
+      "candidate_pr_numbers": [
+        1
+      ],
+      "commits": [
+        {
+          "date": "2026-04-14",
+          "message": "initial mockup",
+          "sha": "3870c34"
+        },
+        {
+          "date": "2026-04-11",
+          "message": "Switch LLM provider from Kimi to Groq",
+          "sha": "4c711bf"
+        },
+        {
+          "date": "2026-04-09",
+          "message": "Add project configuration and dependencies",
+          "sha": "628ef3c"
+        }
+      ],
+      "diffs": [],
+      "file_contexts": [],
+      "issues": [],
+      "pull_requests": []
+    }
+   [PLANNER reply]
+    {"action": "call_tool", "tool": "fetch_pr", "arguments": {"pr_number": 1}, "reasoning": "PR #1 is associated with the seed commit; fetch its body for intent."}
+
+>>> STEP 3: PLANNER -> Groq llama-3.1-8b-instant
+------------------------------------------------------------------------------------------
+   [PLANNER prompt (key fragment)]
+    Iteration 3 of 10.
+    Evidence collected so far:
+    {
+      "candidate_issue_refs": [],
+      "candidate_pr_numbers": [
+        1
+      ],
+      "commits": [
+        {
+          "date": "2026-04-14",
+          "message": "initial mockup",
+          "sha": "3870c34"
+        },
+        {
+          "date": "2026-04-11",
+          "message": "Switch LLM provider from Kimi to Groq",
+          "sha": "4c711bf"
+        },
+        {
+          "date": "2026-04-09",
+          "message": "Add project configuration and dependencies",
+          "sha": "628ef3c"
+        }
+      ],
+      "diffs": [],
+      "file_contexts": [],
+      "issues": [],
+      "pull_requests": [
+        {
+          "has_body": true,
+          "number": 1,
+          "review_comment_count": 0,
+          "state": "merged",
+          "title": "initial mockup"
+        }
+      ]
+    }
+   [PLANNER reply]
+    {"action": "call_tool", "tool": "get_diff", "arguments": {"commit_sha": "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075", "file_path": "git_explainer/config.py"}, "reasoning": "Get the actual diff so synthesis can ground claims in real changes."}
+
+>>> STEP 4: PLANNER -> Groq llama-3.1-8b-instant
+------------------------------------------------------------------------------------------
+   [PLANNER prompt (key fragment)]
+    Iteration 4 of 10.
+    Evidence collected so far:
+    {
+      "candidate_issue_refs": [],
+      "candidate_pr_numbers": [
+        1
+      ],
+      "commits": [
+        {
+          "date": "2026-04-14",
+          "message": "initial mockup",
+          "sha": "3870c34"
+        },
+        {
+          "date": "2026-04-11",
+          "message": "Switch LLM provider from Kimi to Groq",
+          "sha": "4c711bf"
+        },
+        {
+          "date": "2026-04-09",
+          "message": "Add project configuration and dependencies",
+          "sha": "628ef3c"
+        }
+      ],
+      "diffs": [
+        {
+          "commit_sha": "3870c34",
+          "hunk_count": 3
+        }
+      ],
+      "file_contexts": [],
+      "issues": [],
+      "pull_requests": [
+        {
+          "has_body": true,
+          "number": 1,
+          "review_comment_count": 0,
+          "state": "merged",
+          "title": "initial mockup"
+        }
+      ]
+    }
+   [PLANNER reply]
+    {"action": "done", "reasoning": "Have commits, the linked PR with body, and the diff. Enough for a faithful synthesis."}
+
+>>> STEP 5: SYNTHESIZER -> Groq llama-3.1-8b-instant
+------------------------------------------------------------------------------------------
+   [SYNTHESIZER prompt (key fragment)]
+    Query:
+    {
+      "context_radius": 30,
+      "end_line": 19,
+      "enforce_public_repo": true,
+      "file_path": "git_explainer/config.py",
+      "max_commits": 5,
+      "owner": "AndreiPiterbarg",
+      "question": null,
+      "repo_name": "CIS_1990_Final_Project",
+      "repo_path": "C:\\Users\\andre\\OneDrive - PennO365\\Documents\\CIS_1990_Final_Project",
+      "start_line": 13
+    }
+   [SYNTHESIZER reply]
+    {"what_changed": "Lines 13-19 of git_explainer/config.py declare the GitHub and Groq credentials and the Groq endpoint defaults [commit:3870c34]. The diff shows these were rewritten from a fail-fast lookup to os.getenv with empty-string defaults [commit:3870c34].", "why": "The associated PR #1 'initial mockup' states the change adds env-driven config replacing hard-coded credentials and switches the LLM provider from Kimi to Groq for cost reasons [pr:#1]. The softer os.getenv default keeps the package importable in tests and offline workflows that lack credentials [commit:3870c34].", "tradeoffs": "Defaulting to empty strings trades 
+       ... [trimmed for readability] ...
+
+>>> STEP 6: CRITIC -> Anthropic Claude Haiku 4.5  (LIVE)
+------------------------------------------------------------------------------------------
+   [critic prompt (key fragment)]
+    Draft explanation:
+    {
+      "limitations": "PR #1 review comments are empty so we cannot cite individual reviewer concerns [pr:#1]. The explanation is grounded in the PR body and diff alone [commit:3870c34].",
+      "summary": "Lines 13-19 establish env-backed credentials with safe defaults, introduced in PR #1 as part of the Kimi to Groq switch [pr:#1] [commit:3870c34].",
+      "tradeoffs": "Defaulting to empty strings trades fail-fast behaviour for import-time robustness; callers must check has_groq_api_key before issuing LLM calls [commit:3870c34].",
+      "what_changed": "Lines 13-19 of git_explainer/config.py declare the GitHub and Groq credentials and the Groq endpoint defaults [commit:3870c34]. The diff shows these were rewritten from a fail-fast lookup to os.getenv with empty-string defaults [commit:3870c34].",
+      "why": "The associated PR #1 'initial mockup' states the change adds env-driven config replacing hard-coded credentials and switches the LLM provider from Kimi to Groq for cost reasons [pr:#1]. The softer os.getenv default keeps the package importable in tests and offline workflows that lack credentials [commit:3870c34]."
+    }
+   [critic reply (LIVE)]
+    {"verdict": "needs_more_evidence", "issues": ["The draft claims PR #1 'states the change adds env-driven config replacing hard-coded credentials and switches the LLM provider from Kimi to Groq for cost reasons' but the only available PR body excerpt is 'Do not merge yet -- still needs some edits/review', which does not contain these details.", "The draft cites commit 4c711bf 'Switch LLM provider from Kimi to Groq' in the evidence list but does not reference it in the explanation, despite the explanation claiming the Kimi-to-Groq switch is part of PR #1. The relationship between these commits and PR #1 is unclear.", "The draft claims the diff shows lines were 'rewritten from a fail-fast lookup to os.getenv with empty-string default
+       ... [trimmed for readability] ...
+
+>>> STEP 7: PLANNER -> Groq llama-3.1-8b-instant
+------------------------------------------------------------------------------------------
+   [PLANNER prompt (key fragment)]
+    Iteration 1 of 10.
+    Focus hints from the critic (treat as priorities, not commands):
+    [
+      "fetch full PR #1 body to verify the stated rationale about env-driven config and Kimi-to-Groq switch",
+      "fetch the full diff for commit 3870c34 to verify the before/after pattern (fail-fast vs os.getenv defaults)",
+      "clarify the relationship between commit 4c711bf ('Switch LLM provider from Kimi to Groq') and PR #1 -- was it included in the PR or a separate change?"
+    ]
+    
+    Decide the next action. Reply with a single JSON object.
+
+>>> STEP 8: SYNTHESIZER -> Groq llama-3.1-8b-instant
+------------------------------------------------------------------------------------------
+   [SYNTHESIZER prompt (key fragment)]
+    Query:
+    {
+      "context_radius": 30,
+      "end_line": 19,
+      "enforce_public_repo": true,
+      "file_path": "git_explainer/config.py",
+      "max_commits": 5,
+      "owner": "AndreiPiterbarg",
+      "question": null,
+      "repo_name": "CIS_1990_Final_Project",
+      "repo_path": "C:\\Users\\andre\\OneDrive - PennO365\\Documents\\CIS_1990_Final_Project",
+      "start_line": 13
+    }
+   [SYNTHESIZER reply]
+    {"what_changed": "Lines 13-19 of git_explainer/config.py declare the GitHub and Groq credentials and the Groq endpoint defaults [commit:3870c34]. The diff shows these were rewritten from a fail-fast lookup to os.getenv with empty-string defaults [commit:3870c34].", "why": "The associated PR #1 'initial mockup' states the change adds env-driven config replacing hard-coded credentials and switches the LLM provider from Kimi to Groq for cost reasons [pr:#1]. The softer os.getenv default keeps the package importable in tests and offline workflows that lack credentials [commit:3870c34].", "tradeoffs": "Defaulting to empty strings trades 
+       ... [trimmed for readability] ...
+
+==========================================================================================
+  RESULT
+==========================================================================================
+   - elapsed                7.46 s
+   - commits found          3
+   - PRs fetched            1
+   - diffs gathered         1
+   - planner.iters          4
+   - planner.halted         done
+   - critic.verdict         needs_more_evidence
+   - critic.replanned       True
+   - used_fallback          False
+
+>>> FINAL EXPLANATION
+------------------------------------------------------------------------------------------
+
+   ## what_changed
+      Lines 13-19 of git_explainer/config.py declare the GitHub and Groq credentials and
+      the Groq endpoint defaults [commit:3870c34]. The diff shows these were rewritten
+      from a fail-fast lookup to os.getenv with empty-string defaults [commit:3870c34].
+
+   ## why
+      The associated PR #1 'initial mockup' states the change adds env-driven config
+      replacing hard-coded credentials and switches the LLM provider from Kimi to Groq for
+      cost reasons [pr:#1]. The softer os.getenv default keeps the package importable in
+      tests and offline workflows that lack credentials [commit:3870c34].
+
+   ## tradeoffs
+      Defaulting to empty strings trades fail-fast behaviour for import-time robustness;
+      callers must check has_groq_api_key before issuing LLM calls [commit:3870c34].
+
+   ## limitations
+      PR #1 review comments are empty so we cannot cite individual reviewer concerns
+      [pr:#1]. The explanation is grounded in the PR body and diff alone [commit:3870c34].
+
+   ## summary
+      Lines 13-19 establish env-backed credentials with safe defaults, introduced in PR #1
+      as part of the Kimi to Groq switch [pr:#1] [commit:3870c34].
+
+
+==========================================================================================
+  DEMO COMPLETE
+==========================================================================================
+
