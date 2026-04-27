@@ -416,8 +416,7 @@ Scored by [eval/evaluate.py](../eval/evaluate.py) against 20 benchmark
 cases in [eval/benchmark.json](../eval/benchmark.json).
 [eval/results.json](../eval/results.json) is the fallback-only run
 covering 16 cases (the other four require `use_llm=True` or an external
-repo clone); [eval/results.notebook.json](../eval/results.notebook.json)
-has the aggregated summary plus the four LLM-on cases.
+repo clone).
 
 | Metric | Target | Actual |
 |---|---|---|
