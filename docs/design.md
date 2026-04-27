@@ -269,3 +269,7 @@ The primary success criteria are retrieval recall against hand-authored gold com
 | Latency p95 | — | 1.094s fallback / 0.192s LLM |
 
 The faithfulness rubric is a deterministic proxy, not a human rater; the proposal's 80% target assumed human rating and is not yet measured.
+
+## 8. User transcripts
+
+The required three user transcripts are included in [docs/transcripts.md](transcripts.md). They cover a successful line-range query, a difficult multi-commit/ambiguous-history case, and a safety case with adversarial prompt-injection-style input.
