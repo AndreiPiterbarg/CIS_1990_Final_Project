@@ -298,7 +298,7 @@ accepted the line range, the orchestrator traced history via
 `git log --follow -L41,60:guardrails.py` in
 [git_explainer/tools/git_utils.py](../git_explainer/tools/git_utils.py),
 collected two commits, fetched the merged PR #1 from the GitHub API in
-[git_explainer/tools/github_issue_lookup.py](../git_explainer/tools/github_issue_lookup.py),
+[git_explainer/tools/github_pr_lookup.py](../git_explainer/tools/github_pr_lookup.py),
 and assembled a five-section `explanation` with `[commit:...]` and
 `[pr:#1]` citations on every sentence. The `_ensure_citation_coverage`
 check in
