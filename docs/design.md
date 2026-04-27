@@ -2,63 +2,28 @@
 
 CIS 1990 Final Project. Authors: Andrei and Alistair.
 
-Architectural reference for the code in this repository. User-facing
-usage lives in [README.md](../README.md); eval results and critique
-live in [eval/testing_metrics.md](../eval/testing_metrics.md).
+Architectural reference for the code in this repository. User-facing usage lives in [README.md](../README.md); eval results and critique live in [eval/testing_metrics.md](../eval/testing_metrics.md).
 
 ## 1. Problem, user, motivation, and scope
 
-**Problem.** Developers often inherit code whose history is spread
-across line-level git metadata, commit messages, pull requests, issue
-threads, review comments, and surrounding source context. Looking this
-up manually is slow and error-prone, especially when a line has been
-renamed, moved, refactored, or touched by several commits.
+**Problem.** Developers often inherit code whose history is spread across line-level git metadata, commit messages, pull requests, issue threads, review comments, and surrounding source context. Looking this up manually is slow and error-prone, especially when a line has been renamed, moved, refactored, or touched by several commits.
 
-**Intended user.** The primary user is a developer, reviewer, teaching
-assistant, or maintainer working in a local clone who wants to answer
-"why does this code exist?" without manually chasing `git blame`,
-`git log`, GitHub PRs, and issue links. The user is assumed to be able
-to run a CLI and inspect JSON, but not necessarily to know the full
-project history.
+**Intended user.** The primary user is a developer, reviewer, teaching assistant, or maintainer working in a local clone who wants to answer "why does this code exist?" without manually chasing `git blame`, `git log`, GitHub PRs, and issue links. The user is assumed to be able to run a CLI and inspect JSON, but not necessarily to know the full project history.
 
-**Motivation.** The project is designed to make code history
-explanations more auditable than a normal chatbot answer. Instead of
-only producing prose, it returns the retrieved commits, pull requests,
-issues, file snippets, and diffs that support the explanation, and it
-requires citations in synthesized claims so users can check the answer.
+**Motivation.** The project is designed to make code history explanations more auditable than a normal chatbot answer. Instead of only producing prose, it returns the retrieved commits, pull requests, issues, file snippets, and diffs that support the explanation, and it requires citations in synthesized claims so users can check the answer.
 
-**Project scope.** The agent takes a local git clone plus either a
-line range or a natural-language question, and returns a structured
-JSON [ExplanationResult](../git_explainer/orchestrator.py#L43) with
-five synthesis sections (`what_changed`, `why`, `tradeoffs`,
-`limitations`, `summary`) plus the commits, pull requests, issues,
-file contexts, and diffs that back them, cache statistics, and
-fallback / condensation audit fields.
+**Project scope.** The agent takes a local git clone plus either a line range or a natural-language question, and returns a structured JSON [ExplanationResult](../git_explainer/orchestrator.py#L43) with five synthesis sections (`what_changed`, `why`, `tradeoffs`, `limitations`, `summary`) plus the commits, pull requests, issues, file contexts, and diffs that back them, cache statistics, and fallback / condensation audit fields.
 
-Input shapes, validated in
-[guardrails.py:41](../git_explainer/guardrails.py#L41):
+Input shapes, validated in [guardrails.py:41](../git_explainer/guardrails.py#L41):
 
 1. `(repo_path, file_path, start_line, end_line)` — direct line-range mode.
-2. `(repo_path, --question ...)` with an optional `file_path` hint —
-   resolved to a concrete span before tracing.
+2. `(repo_path, --question ...)` with an optional `file_path` hint — resolved to a concrete span before tracing.
 
-Out of scope: non-GitHub hosting, private repos (refused by default,
-`enforce_public_repo=True`, opt out via `--allow-private-repo`),
-binary files, cross-repository traces, and fully natural-language
-repository-wide search that is not tied back to a concrete file span.
+Out of scope: non-GitHub hosting, private repos (refused by default, `enforce_public_repo=True`, opt out via `--allow-private-repo`), binary files, cross-repository traces, and fully natural-language repository-wide search that is not tied back to a concrete file span.
 
 ## 2. System flow
 
-A single invocation of `python main.py ...` flows through CLI entry,
-`validate_query`, optional question-to-code resolution,
-`trace_line_history` (with a `search_commits` fallback when the line
-trace returns nothing), per-commit evidence collection with
-`ExplainerMemory` caching, a pre-synthesis evidence-condensation pass
-(so long PR/issue threads do not overflow the synthesis prompt),
-synthesis (LLM with citation-coverage validation, otherwise a
-deterministic fallback), and JSON emission. Guardrail checks
-(double-octagon nodes) can terminate the run by raising `ValueError`.
-Cylinders represent reads or writes against `ExplainerMemory`.
+A single invocation of `python main.py ...` flows through CLI entry, `validate_query`, optional question-to-code resolution, `trace_line_history` (with a `search_commits` fallback when the line trace returns nothing), per-commit evidence collection with `ExplainerMemory` caching, a pre-synthesis evidence-condensation pass (so long PR/issue threads do not overflow the synthesis prompt), synthesis (LLM with citation-coverage validation, otherwise a deterministic fallback), and JSON emission. Guardrail checks (double-octagon nodes) can terminate the run by raising `ValueError`. Cylinders represent reads or writes against `ExplainerMemory`.
 
 ```mermaid
 flowchart TD
@@ -137,209 +102,85 @@ flowchart TD
     class Error errorNode
 ```
 
-## 3. Tools
+## 3. Design rationale by required component
 
-## 3a. Design rationale by required component
-
-This section makes explicit the design rationale for each required
-agent component. The sections below do not replace the implementation
-details elsewhere in this document; they explain why those pieces were
-chosen and what tradeoffs they carry.
+This section makes explicit the design rationale for each required agent component. The sections below do not replace the implementation details elsewhere in this document; they explain why those pieces were chosen and what tradeoffs they carry.
 
 ### Data incorporation
 
-The agent incorporates four main evidence sources: local git history,
-GitHub pull request metadata, GitHub issue metadata, and source-level
-context from diffs plus surrounding file snapshots. Local git history
-is the grounding layer because the user asks about a concrete file span
-or a question that is resolved into one. GitHub PRs, review comments,
-issues, and issue comments add intent signals that are often absent
-from commit messages.
+The agent incorporates four main evidence sources: local git history, GitHub pull request metadata, GitHub issue metadata, and source-level context from diffs plus surrounding file snapshots. Local git history is the grounding layer because the user asks about a concrete file span or a question that is resolved into one. GitHub PRs, review comments, issues, and issue comments add intent signals that are often absent from commit messages.
 
-This design prioritizes auditability over broadness. Every retrieved
-artifact is returned in the JSON output so the explanation can be
-checked against the evidence. The main alternative would be a more
-open-ended web or repository search, but that would make it harder to
-prove why a particular piece of evidence was relevant. The limitation
-is that rationale not captured in commits, PRs, issues, review
-comments, or nearby code will not be visible to the agent.
+This design prioritizes auditability over broadness. Every retrieved artifact is returned in the JSON output so the explanation can be checked against the evidence. The main alternative would be a more open-ended web or repository search, but that would make it harder to prove why a particular piece of evidence was relevant. The limitation is that rationale not captured in commits, PRs, issues, review comments, or nearby code will not be visible to the agent.
 
 ### Memory and retrieval
 
-Retrieval starts with line history because the line span is the most
-specific signal the user provides. In question mode, the system first
-uses `question_resolver` to map natural-language text to a concrete
-file span, then runs the same history pipeline. `ExplainerMemory`
-caches GitHub and context lookups in `.git_explainer_cache.json` so
-repeated runs avoid unnecessary API calls and keep evaluation runs more
-stable.
+Retrieval starts with line history because the line span is the most specific signal the user provides. In question mode, the system first uses `question_resolver` to map natural-language text to a concrete file span, then runs the same history pipeline. `ExplainerMemory` caches GitHub and context lookups in `.git_explainer_cache.json` so repeated runs avoid unnecessary API calls and keep evaluation runs more stable.
 
-The cache is intentionally simple and local. A database or vector index
-would support richer semantic retrieval, but would add setup burden and
-make the evidence path less transparent. The tradeoff is that the JSON
-cache can become stale if GitHub conversations change, and it is not
-designed for concurrent writes by many processes.
+The cache is intentionally simple and local. A database or vector index would support richer semantic retrieval, but would add setup burden and make the evidence path less transparent. The tradeoff is that the JSON cache can become stale if GitHub conversations change, and it is not designed for concurrent writes by many processes.
 
 ### Tools
 
-The system uses small deterministic tools rather than letting an LLM
-freely choose arbitrary shell commands. Three central examples are
-`git_blame_trace`, `github_pr_lookup`, and `git_diff_reader`.
-`git_blame_trace` answers which commits shaped the selected lines;
-`github_pr_lookup` enriches those commits with review and PR context;
-`git_diff_reader` extracts compact, redacted change summaries for the
-synthesis step.
+The system uses small deterministic tools rather than letting an LLM freely choose arbitrary shell commands. Three central examples are `git_blame_trace`, `github_pr_lookup`, and `git_diff_reader`. `git_blame_trace` answers which commits shaped the selected lines; `github_pr_lookup` enriches those commits with review and PR context; `git_diff_reader` extracts compact, redacted change summaries for the synthesis step.
 
-The main reason for this tool design is control. Narrow tools are
-easier to test, cite, cache, and threat-model than a general command
-executor. The tradeoff is less flexibility: the fixed pipeline may miss
-unusual evidence that a human investigator would search for manually.
-The optional planner/critic path can add more adaptive behavior, but
-the default path keeps retrieval deterministic.
+The main reason for this tool design is control. Narrow tools are easier to test, cite, cache, and threat-model than a general command executor. The tradeoff is less flexibility: the fixed pipeline may miss unusual evidence that a human investigator would search for manually. The optional planner/critic path can add more adaptive behavior, but the default path keeps retrieval deterministic.
+
+Implemented tools. Each tool under [git_explainer/tools/](../git_explainer/tools/) is a thin module with one job:
+
+- **[git_blame_trace](../git_explainer/tools/git_blame_trace.py#L86)** — primary tracer. `git log -L` first, then `git blame -M` with `.git-blame-ignore-revs` and `git log --follow -M` as fallbacks.
+- **[github_pr_lookup](../git_explainer/tools/github_pr_lookup.py)** — `find_prs_for_commit`, `fetch_pr`, `fetch_pr_comments`.
+- **[github_issue_lookup](../git_explainer/tools/github_issue_lookup.py)** — `extract_issue_refs`, `fetch_issue`, `fetch_issue_comments`.
+- **[file_context_reader](../git_explainer/tools/file_context_reader.py)** — reads file contents at a given revision.
+- **[git_diff_reader](../git_explainer/tools/git_diff_reader.py)** — compact per-commit diff summaries with credential redaction ([_redact_sensitive_diff_content](../git_explainer/tools/git_diff_reader.py#L332)).
+- **[commit_search](../git_explainer/tools/commit_search.py)** — last-resort `git log` wrapper used when line tracing returns nothing.
+- **[question_resolver](../git_explainer/tools/question_resolver.py)** — maps a natural-language question to a concrete line span using AST parsing for Python files and keyword matching elsewhere. Not an LLM call.
+
+All external fetches are cached in the JSON-backed [ExplainerMemory](../git_explainer/memory.py#L27) (stored at `.git_explainer_cache.json` inside the target repo, seven buckets keyed by shape).
 
 ### Robust system design
 
-The robust path has several layers: input validation before any costly
-work, fallback commit search when line tracing returns no commits,
-evidence condensation when prompt payloads are too large, LLM synthesis
-only when available, citation validation after synthesis, and a
-deterministic fallback summary when the LLM is disabled or fails.
+The robust path has several layers: input validation before any costly work, fallback commit search when line tracing returns no commits, evidence condensation when prompt payloads are too large, LLM synthesis only when available, citation validation after synthesis, and a deterministic fallback summary when the LLM is disabled or fails.
 
-This design assumes the agent should usually return a limited,
-inspectable answer instead of failing just because the LLM is
-unavailable. It also assumes that unsupported fluent prose is worse
-than a plain fallback. The limitation is that deterministic fallback
-summaries are less nuanced, and citation coverage checks only verify
-that claims have citation-shaped support, not that every cited claim is
-semantically proven.
+This design assumes the agent should usually return a limited, inspectable answer instead of failing just because the LLM is unavailable. It also assumes that unsupported fluent prose is worse than a plain fallback. The limitation is that deterministic fallback summaries are less nuanced, and citation coverage checks only verify that claims have citation-shaped support, not that every cited claim is semantically proven.
 
 ### Guardrails
 
-The guardrails constrain both the user-facing input and the evidence
-that reaches the model. They validate line ranges, reject missing or
-binary files, enforce repository containment, cap request sizes, refuse
-private repositories by default, redact likely credentials from diffs,
-and reject synthesized prose that lacks citations.
+The guardrails constrain both the user-facing input and the evidence that reaches the model. They validate line ranges, reject missing or binary files, enforce repository containment, cap request sizes, refuse private repositories by default, redact likely credentials from diffs, and reject synthesized prose that lacks citations.
 
-The design goal is to keep the agent useful for normal code-history
-questions while reducing risk from path traversal, prompt injection,
-credential exposure, private repository leakage, and hallucinated
-answers. The main tradeoff is conservative behavior: some legitimate
-private or offline workflows require an explicit opt-out
-(`--allow-private-repo`), and some useful large queries must be narrowed
-to stay within span and context limits.
+The design goal is to keep the agent useful for normal code-history questions while reducing risk from path traversal, prompt injection, credential exposure, private repository leakage, and hallucinated answers. The main tradeoff is conservative behavior: some legitimate private or offline workflows require an explicit opt-out (`--allow-private-repo`), and some useful large queries must be narrowed to stay within span and context limits.
 
 ### Evaluation
 
-Evaluation is built around benchmark cases rather than only manual
-inspection. The harness checks whether the agent retrieves expected
-commits, PRs, and issues; whether explanations include citations;
-whether citations resolve to returned evidence; whether invalid inputs
-fail safely; and whether latency remains reasonable. The evaluation
-also distinguishes fallback-only runs from LLM-enabled runs.
+Evaluation is built around benchmark cases rather than only manual inspection. The harness checks whether the agent retrieves expected commits, PRs, and issues; whether explanations include citations; whether citations resolve to returned evidence; whether invalid inputs fail safely; and whether latency remains reasonable. The evaluation also distinguishes fallback-only runs from LLM-enabled runs.
 
-This design separates retrieval correctness from explanation quality.
-That matters because an answer can retrieve the right commits while
-still summarizing them poorly, or produce well-formatted citations that
-do not fully support the prose. The limitation is that the deterministic
-faithfulness score is a proxy rather than a human judgment, and LLM
-judge results, when used, are still model-based rather than definitive.
-
-Each tool under [git_explainer/tools/](../git_explainer/tools/) is a
-thin module with one job:
-
-- **[git_blame_trace](../git_explainer/tools/git_blame_trace.py#L86)** —
-  primary tracer. `git log -L` first, then `git blame -M` with
-  `.git-blame-ignore-revs` and `git log --follow -M` as fallbacks.
-- **[github_pr_lookup](../git_explainer/tools/github_pr_lookup.py)** —
-  `find_prs_for_commit`, `fetch_pr`, `fetch_pr_comments`.
-- **[github_issue_lookup](../git_explainer/tools/github_issue_lookup.py)** —
-  `extract_issue_refs`, `fetch_issue`, `fetch_issue_comments`.
-- **[file_context_reader](../git_explainer/tools/file_context_reader.py)** —
-  reads file contents at a given revision.
-- **[git_diff_reader](../git_explainer/tools/git_diff_reader.py)** —
-  compact per-commit diff summaries with credential redaction
-  ([_redact_sensitive_diff_content](../git_explainer/tools/git_diff_reader.py#L332)).
-- **[commit_search](../git_explainer/tools/commit_search.py)** —
-  last-resort `git log` wrapper used when line tracing returns nothing.
-- **[question_resolver](../git_explainer/tools/question_resolver.py)** —
-  maps a natural-language question to a concrete line span using AST
-  parsing for Python files and keyword matching elsewhere. Not an LLM
-  call.
-
-All external fetches are cached in the JSON-backed
-[ExplainerMemory](../git_explainer/memory.py#L27) (stored at
-`.git_explainer_cache.json` inside the target repo, seven buckets keyed
-by shape).
+This design separates retrieval correctness from explanation quality. That matters because an answer can retrieve the right commits while still summarizing them poorly, or produce well-formatted citations that do not fully support the prose. The limitation is that the deterministic faithfulness score is a proxy rather than a human judgment, and LLM judge results, when used, are still model-based rather than definitive.
 
 ## 4. Guardrails
 
-- **Line span** capped at `DEFAULT_MAX_LINE_SPAN = 200`
-  ([guardrails.py:71-76](../git_explainer/guardrails.py#L71-L76)).
-- **Positive integers and ordering**: `start_line`, `end_line > 0` and
-  `end_line >= start_line`
-  ([guardrails.py:66-69](../git_explainer/guardrails.py#L66-L69)).
-- **File existence**: missing or binary files raise
-  ([guardrails.py:117-125](../git_explainer/guardrails.py#L117-L125)).
-- **Repository containment**: [normalize_file_path](../git_explainer/guardrails.py#L128)
-  rejects paths outside the repo root.
-- **Private-repo refusal (default on)**: `enforce_public_repo` now
-  defaults to `True`. The guardrail calls
-  [ensure_public_github_repo](../git_explainer/guardrails.py#L161),
-  which rejects 404 or `private: true`. Opt out at the CLI with
-  `--allow-private-repo` or programmatically by constructing
-  [ExplainerQuery](../git_explainer/guardrails.py#L24) with
-  `enforce_public_repo=False`.
-- **Parameter clamping**: `max_commits` ∈ `[1, 20]`, `context_radius`
-  ∈ `[0, 200]`
-  ([guardrails.py:102-103](../git_explainer/guardrails.py#L102-L103)).
-- **Citation coverage**: [_ensure_citation_coverage](../git_explainer/orchestrator.py#L420)
-  rejects synthesized sentences without a bracketed citation and
-  triggers the retry loop.
+- **Line span** capped at `DEFAULT_MAX_LINE_SPAN = 200` ([guardrails.py:71-76](../git_explainer/guardrails.py#L71-L76)).
+- **Positive integers and ordering**: `start_line`, `end_line > 0` and `end_line >= start_line` ([guardrails.py:66-69](../git_explainer/guardrails.py#L66-L69)).
+- **File existence**: missing or binary files raise ([guardrails.py:117-125](../git_explainer/guardrails.py#L117-L125)).
+- **Repository containment**: [normalize_file_path](../git_explainer/guardrails.py#L128) rejects paths outside the repo root.
+- **Private-repo refusal (default on)**: `enforce_public_repo` now defaults to `True`. The guardrail calls [ensure_public_github_repo](../git_explainer/guardrails.py#L161), which rejects 404 or `private: true`. Opt out at the CLI with `--allow-private-repo` or programmatically by constructing [ExplainerQuery](../git_explainer/guardrails.py#L24) with `enforce_public_repo=False`.
+- **Parameter clamping**: `max_commits` ∈ `[1, 20]`, `context_radius` ∈ `[0, 200]` ([guardrails.py:102-103](../git_explainer/guardrails.py#L102-L103)).
+- **Citation coverage**: [_ensure_citation_coverage](../git_explainer/orchestrator.py#L420) rejects synthesized sentences without a bracketed citation and triggers the retry loop.
 
 ## 5. Evidence pre-summarization (condensation)
 
-Long GitHub threads can easily overflow the synthesis model's context
-window. Between evidence collection and synthesis, the orchestrator
-invokes
-[condense_evidence](../git_explainer/evidence_condenser.py) on the
-collected payload (commits, pull requests, issues, file contexts,
-diffs).
+Long GitHub threads can easily overflow the synthesis model's context window. Between evidence collection and synthesis, the orchestrator invokes [condense_evidence](../git_explainer/evidence_condenser.py) on the collected payload (commits, pull requests, issues, file contexts, diffs).
 
-Trigger threshold. If the serialized evidence dict is at or under
-[config.EVIDENCE_CHAR_BUDGET](../git_explainer/config.py#L45) (default
-`30000` characters, overridable via the `EVIDENCE_CHAR_BUDGET` env
-var), condensation is a no-op and the report's `method_used` is
-`"none"`. Only when the payload exceeds the budget does the condenser
-run.
+Trigger threshold. If the serialized evidence dict is at or under [config.EVIDENCE_CHAR_BUDGET](../git_explainer/config.py#L45) (default `30000` characters, overridable via the `EVIDENCE_CHAR_BUDGET` env var), condensation is a no-op and the report's `method_used` is `"none"`. Only when the payload exceeds the budget does the condenser run.
 
 Two-tier strategy. For each eligible field, longest first:
 
-1. Tier 1 (preferred): the LLM is asked for a concise summary
-   (`EVIDENCE_SUMMARY_TARGET_CHARS`, default `800`) that explicitly
-   preserves commit SHAs, PR/issue numbers, file paths, technical
-   trade-offs, and stated intent. Output is prefixed with
-   `[pre-summarized]` in the condensed copy.
-2. Tier 2 (fallback): deterministic head+tail truncation with a
-   visible elision marker (`[... content truncated: N chars elided
-   ...]`). Used when the LLM is unavailable or returns an empty
-   reply. Output is prefixed with `[truncated]`.
+1. Tier 1 (preferred): the LLM is asked for a concise summary (`EVIDENCE_SUMMARY_TARGET_CHARS`, default `800`) that explicitly preserves commit SHAs, PR/issue numbers, file paths, technical trade-offs, and stated intent. Output is prefixed with `[pre-summarized]` in the condensed copy.
+2. Tier 2 (fallback): deterministic head+tail truncation with a visible elision marker (`[... content truncated: N chars elided ...]`). Used when the LLM is unavailable or returns an empty reply. Output is prefixed with `[truncated]`.
 
 Fields touched vs. preserved. Condensation is intentionally narrow:
 
-- **Condensed**: `pull_requests[i].body`,
-  `pull_requests[i].review_comments[j].body`, `issues[i].body`,
-  `issues[i].comments[j].body`, only when length exceeds
-  [config.EVIDENCE_FIELD_MAX_CHARS](../git_explainer/config.py#L46)
-  (default `3000`).
-- **Preserved verbatim**: all commit SHAs (full and short),
-  PR/issue numbers, titles, labels, URLs, `file_contexts` entries,
-  `diffs` entries, and any other structural metadata.
+- **Condensed**: `pull_requests[i].body`, `pull_requests[i].review_comments[j].body`, `issues[i].body`, `issues[i].comments[j].body`, only when length exceeds [config.EVIDENCE_FIELD_MAX_CHARS](../git_explainer/config.py#L46) (default `3000`).
+- **Preserved verbatim**: all commit SHAs (full and short), PR/issue numbers, titles, labels, URLs, `file_contexts` entries, `diffs` entries, and any other structural metadata.
 
-Report shape. The condenser returns a
-[CondensationReport](../git_explainer/evidence_condenser.py#L35)
-serialized as the `condensation` field of the
-[ExplanationResult](../git_explainer/orchestrator.py#L44):
+Report shape. The condenser returns a [CondensationReport](../git_explainer/evidence_condenser.py#L35) serialized as the `condensation` field of the [ExplanationResult](../git_explainer/orchestrator.py#L44):
 
 ```json
 "condensation": {
@@ -350,19 +191,11 @@ serialized as the `condensation` field of the
 }
 ```
 
-Caller visibility. The `ExplanationResult` returned to the caller
-still contains the **un-condensed originals** for
-`pull_requests`, `issues`, `file_contexts`, and `diffs`. Only the
-synthesis LLM sees the condensed view, via
-`build_synthesis_prompt(condensed_evidence, ...)` in
-[orchestrator.py](../git_explainer/orchestrator.py#L133). Downstream
-consumers (notebooks, eval harness, `--use-llm-judge`) therefore score
-the agent against the full evidence, not the compressed view.
+Caller visibility. The `ExplanationResult` returned to the caller still contains the **un-condensed originals** for `pull_requests`, `issues`, `file_contexts`, and `diffs`. Only the synthesis LLM sees the condensed view, via `build_synthesis_prompt(condensed_evidence, ...)` in [orchestrator.py](../git_explainer/orchestrator.py#L133). Downstream consumers (notebooks, eval harness, `--use-llm-judge`) therefore score the agent against the full evidence, not the compressed view.
 
 ## 6. Threat model
 
-The diagram maps each risk to the control that addresses it, with
-file:line references.
+The diagram maps each risk to the control that addresses it, with file:line references.
 
 ```mermaid
 flowchart LR
@@ -412,11 +245,18 @@ flowchart LR
 
 ## 7. Evaluation
 
-Scored by [eval/evaluate.py](../eval/evaluate.py) against 20 benchmark
-cases in [eval/benchmark.json](../eval/benchmark.json).
-[eval/results.json](../eval/results.json) is the fallback-only run
-covering 16 cases (the other four require `use_llm=True` or an external
-repo clone).
+Scored by [eval/evaluate.py](../eval/evaluate.py) against 20 benchmark cases in [eval/benchmark.json](../eval/benchmark.json). [eval/results.json](../eval/results.json) is the fallback-only run covering 16 cases (the other four require `use_llm=True` or an external repo clone).
+
+Evaluation methodology. The benchmark suite is organized around task types that correspond to the agent's main responsibilities:
+
+- **Line-range explanation tasks**: the user supplies a repository, file, and line span. Success means the agent validates the input, retrieves the expected commits and related PR/issue evidence, and produces a cited explanation for the selected code.
+- **Question-resolution tasks**: the user supplies a natural-language question, optionally with a file hint. Success means the resolver maps the question to the expected file/span or matched terms before the normal history-tracing pipeline runs.
+- **Thin-evidence and ambiguous-history tasks**: the selected code is connected to multiple commits, weak PR descriptions, or no linked issues. Success means the answer surfaces uncertainty and limitations rather than inventing a single unsupported rationale.
+- **LLM/fallback behavior tasks**: some cases run with `use_llm=True` while others force `--no-llm`. Success means the agent either returns an LLM synthesis that passes citation checks or falls back to the deterministic summary with the correct `used_fallback` behavior.
+- **Failure cases**: invalid repositories, missing files, binary files, impossible line ranges, and end-line values beyond file length should fail clearly with validation errors instead of running partial tool calls or returning misleading explanations.
+- **Adversarial cases**: prompt-injection-shaped questions, path traversal attempts, and cases that should not return PR/issue metadata test whether the system treats user text as data, keeps file access inside the repo, and avoids unsupported evidence claims.
+
+The primary success criteria are retrieval recall against hand-authored gold commits/PRs/issues, citation coverage, citation validity, expected fallback behavior, correct question resolution, and correct abstention when PR or issue evidence should be absent. Latency is tracked as a secondary operational metric. Failure and adversarial cases are judged by refusal quality, absence of unsafe tool behavior, and whether the agent avoids fabricating evidence. The faithfulness score is treated as a proxy because it is deterministic and not a human judgment.
 
 | Metric | Target | Actual |
 |---|---|---|
@@ -428,5 +268,4 @@ repo clone).
 | Latency p50 | — | 0.063s fallback / 0.150s LLM |
 | Latency p95 | — | 1.094s fallback / 0.192s LLM |
 
-The faithfulness rubric is a deterministic proxy, not a human rater;
-the proposal's 80% target assumed human rating and is not yet measured.
+The faithfulness rubric is a deterministic proxy, not a human rater; the proposal's 80% target assumed human rating and is not yet measured.
