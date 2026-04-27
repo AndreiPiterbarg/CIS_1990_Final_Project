@@ -6,14 +6,34 @@ Architectural reference for the code in this repository. User-facing
 usage lives in [README.md](../README.md); eval results and critique
 live in [eval/testing_metrics.md](../eval/testing_metrics.md).
 
-## 1. Scope
+## 1. Problem, user, motivation, and scope
 
-The agent takes a local git clone plus either a line range or a
-natural-language question, and returns a structured JSON
-[ExplanationResult](../git_explainer/orchestrator.py#L43) with five
-synthesis sections (`what_changed`, `why`, `tradeoffs`, `limitations`,
-`summary`) plus the commits, pull requests, issues, file contexts, and
-diffs that back them, cache statistics, and a `used_fallback` flag.
+**Problem.** Developers often inherit code whose history is spread
+across line-level git metadata, commit messages, pull requests, issue
+threads, review comments, and surrounding source context. Looking this
+up manually is slow and error-prone, especially when a line has been
+renamed, moved, refactored, or touched by several commits.
+
+**Intended user.** The primary user is a developer, reviewer, teaching
+assistant, or maintainer working in a local clone who wants to answer
+"why does this code exist?" without manually chasing `git blame`,
+`git log`, GitHub PRs, and issue links. The user is assumed to be able
+to run a CLI and inspect JSON, but not necessarily to know the full
+project history.
+
+**Motivation.** The project is designed to make code history
+explanations more auditable than a normal chatbot answer. Instead of
+only producing prose, it returns the retrieved commits, pull requests,
+issues, file snippets, and diffs that support the explanation, and it
+requires citations in synthesized claims so users can check the answer.
+
+**Project scope.** The agent takes a local git clone plus either a
+line range or a natural-language question, and returns a structured
+JSON [ExplanationResult](../git_explainer/orchestrator.py#L43) with
+five synthesis sections (`what_changed`, `why`, `tradeoffs`,
+`limitations`, `summary`) plus the commits, pull requests, issues,
+file contexts, and diffs that back them, cache statistics, and
+fallback / condensation audit fields.
 
 Input shapes, validated in
 [guardrails.py:41](../git_explainer/guardrails.py#L41):
@@ -22,9 +42,10 @@ Input shapes, validated in
 2. `(repo_path, --question ...)` with an optional `file_path` hint —
    resolved to a concrete span before tracing.
 
-Out of scope: non-GitHub hosting, private repos (refused by default —
+Out of scope: non-GitHub hosting, private repos (refused by default,
 `enforce_public_repo=True`, opt out via `--allow-private-repo`),
-binary files, cross-repository traces.
+binary files, cross-repository traces, and fully natural-language
+repository-wide search that is not tied back to a concrete file span.
 
 ## 2. System flow
 
@@ -117,6 +138,112 @@ flowchart TD
 ```
 
 ## 3. Tools
+
+## 3a. Design rationale by required component
+
+This section makes explicit the design rationale for each required
+agent component. The sections below do not replace the implementation
+details elsewhere in this document; they explain why those pieces were
+chosen and what tradeoffs they carry.
+
+### Data incorporation
+
+The agent incorporates four main evidence sources: local git history,
+GitHub pull request metadata, GitHub issue metadata, and source-level
+context from diffs plus surrounding file snapshots. Local git history
+is the grounding layer because the user asks about a concrete file span
+or a question that is resolved into one. GitHub PRs, review comments,
+issues, and issue comments add intent signals that are often absent
+from commit messages.
+
+This design prioritizes auditability over broadness. Every retrieved
+artifact is returned in the JSON output so the explanation can be
+checked against the evidence. The main alternative would be a more
+open-ended web or repository search, but that would make it harder to
+prove why a particular piece of evidence was relevant. The limitation
+is that rationale not captured in commits, PRs, issues, review
+comments, or nearby code will not be visible to the agent.
+
+### Memory and retrieval
+
+Retrieval starts with line history because the line span is the most
+specific signal the user provides. In question mode, the system first
+uses `question_resolver` to map natural-language text to a concrete
+file span, then runs the same history pipeline. `ExplainerMemory`
+caches GitHub and context lookups in `.git_explainer_cache.json` so
+repeated runs avoid unnecessary API calls and keep evaluation runs more
+stable.
+
+The cache is intentionally simple and local. A database or vector index
+would support richer semantic retrieval, but would add setup burden and
+make the evidence path less transparent. The tradeoff is that the JSON
+cache can become stale if GitHub conversations change, and it is not
+designed for concurrent writes by many processes.
+
+### Tools
+
+The system uses small deterministic tools rather than letting an LLM
+freely choose arbitrary shell commands. Three central examples are
+`git_blame_trace`, `github_pr_lookup`, and `git_diff_reader`.
+`git_blame_trace` answers which commits shaped the selected lines;
+`github_pr_lookup` enriches those commits with review and PR context;
+`git_diff_reader` extracts compact, redacted change summaries for the
+synthesis step.
+
+The main reason for this tool design is control. Narrow tools are
+easier to test, cite, cache, and threat-model than a general command
+executor. The tradeoff is less flexibility: the fixed pipeline may miss
+unusual evidence that a human investigator would search for manually.
+The optional planner/critic path can add more adaptive behavior, but
+the default path keeps retrieval deterministic.
+
+### Robust system design
+
+The robust path has several layers: input validation before any costly
+work, fallback commit search when line tracing returns no commits,
+evidence condensation when prompt payloads are too large, LLM synthesis
+only when available, citation validation after synthesis, and a
+deterministic fallback summary when the LLM is disabled or fails.
+
+This design assumes the agent should usually return a limited,
+inspectable answer instead of failing just because the LLM is
+unavailable. It also assumes that unsupported fluent prose is worse
+than a plain fallback. The limitation is that deterministic fallback
+summaries are less nuanced, and citation coverage checks only verify
+that claims have citation-shaped support, not that every cited claim is
+semantically proven.
+
+### Guardrails
+
+The guardrails constrain both the user-facing input and the evidence
+that reaches the model. They validate line ranges, reject missing or
+binary files, enforce repository containment, cap request sizes, refuse
+private repositories by default, redact likely credentials from diffs,
+and reject synthesized prose that lacks citations.
+
+The design goal is to keep the agent useful for normal code-history
+questions while reducing risk from path traversal, prompt injection,
+credential exposure, private repository leakage, and hallucinated
+answers. The main tradeoff is conservative behavior: some legitimate
+private or offline workflows require an explicit opt-out
+(`--allow-private-repo`), and some useful large queries must be narrowed
+to stay within span and context limits.
+
+### Evaluation
+
+Evaluation is built around benchmark cases rather than only manual
+inspection. The harness checks whether the agent retrieves expected
+commits, PRs, and issues; whether explanations include citations;
+whether citations resolve to returned evidence; whether invalid inputs
+fail safely; and whether latency remains reasonable. The evaluation
+also distinguishes fallback-only runs from LLM-enabled runs.
+
+This design separates retrieval correctness from explanation quality.
+That matters because an answer can retrieve the right commits while
+still summarizing them poorly, or produce well-formatted citations that
+do not fully support the prose. The limitation is that the deterministic
+faithfulness score is a proxy rather than a human judgment, and LLM
+judge results, when used, are still model-based rather than definitive.
 
 Each tool under [git_explainer/tools/](../git_explainer/tools/) is a
 thin module with one job:
