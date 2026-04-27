@@ -328,23 +328,3 @@ what happened:
 ```
 
 `method_used` is one of `"none"`, `"llm"`, `"heuristic"`, or `"mixed"`.
-
-## Notebook Workbench
-
-For an interactive notebook under `eval/`, install the optional notebook dependencies and register the project-local kernel:
-
-```bash
-.venv/bin/python eval/setup_notebook.py
-```
-
-Then open:
-
-```bash
-.venv/bin/jupyter notebook eval/git_explainer_eval_workbench.ipynb
-```
-
-The notebook includes:
-
-- a single-query agent sandbox for trying out `explain_code_history`
-- a configurable benchmark runner with an offline-friendly smoke setup
-- plots for pass/fail counts, retrieval accuracy, citation coverage, citation validity, faithfulness, and latency
