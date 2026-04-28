@@ -227,12 +227,10 @@ def install_tracing() -> None:
             chat_fn=traced_chat_for_critique,
             is_available_fn=is_available_fn or real_critic_is_available,
         )
-        if not raw_reply_seen:
-            show_reply(
-                "critic response (skipped)",
-                json.dumps(report.to_dict(), indent=2, sort_keys=True),
-                max_chars=None,
-            )
+        show_critic_response(
+            "critic structured response" if raw_reply_seen else "critic response (skipped)",
+            report,
+        )
         pause_for_enter()
         return report
 
@@ -293,6 +291,8 @@ def run_scenario(
     demo.bullet("critic.verdict", result["critic"]["verdict"] if result.get("critic") else "n/a")
     demo.bullet("critic.replanned", str(result["critic"].get("replanned", False)) if result.get("critic") else "n/a")
     demo.bullet("used_fallback", str(result["used_fallback"]))
+    if result.get("critic"):
+        show_critic_response("critic final response", result["critic"])
 
     demo.section("FINAL EXPLANATION")
     for key in ("what_changed", "why", "tradeoffs", "limitations", "summary"):
@@ -419,6 +419,16 @@ def show_reply(label: str, reply: str, *, max_chars: int | None = 2500) -> None:
     if max_chars is not None:
         body = demo.trim(body, max_chars)
     demo.block(label, body, color=demo.COLOR_REPLY)
+
+
+def show_critic_response(label: str, report: Any) -> None:
+    if hasattr(report, "to_dict"):
+        payload = report.to_dict()
+    elif isinstance(report, dict):
+        payload = report
+    else:
+        payload = {"response": str(report)}
+    show_reply(label, json.dumps(payload, indent=2, sort_keys=True), max_chars=None)
 
 
 def next_step() -> int:

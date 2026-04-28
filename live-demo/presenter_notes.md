@@ -36,6 +36,7 @@ Point out:
 - The planner display keeps the evidence section complete without dumping the full tool schema every turn.
 - The tool results are not hidden; they become returned evidence.
 - The critic prompt and response are printed as their own visible step after synthesis.
+- The structured critic response calls out the verdict, issues, focus hints, and reasoning before any re-plan happens.
 - The final answer has sections: `what_changed`, `why`, `tradeoffs`, `limitations`, `summary`.
 - Claims cite `[commit:...]`, and the limitations section is explicit when PR or issue evidence is absent.
 

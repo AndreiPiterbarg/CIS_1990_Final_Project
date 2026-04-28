@@ -14,7 +14,7 @@ What it demonstrates:
 - Starts from a single natural-language question instead of hand-picked scenario choices.
 - Displays the original user query before the agent begins.
 - Shows the resolved target in `git_explainer/orchestrator.py` before history tracing continues.
-- Shows each planner turn's evidence section in full, plus the full critic prompt and critic reply or skipped report.
+- Shows each planner turn's evidence section in full, plus the full critic prompt, raw critic reply, and structured critic response.
 - Planner chooses deterministic tools instead of directly answering.
 - Tool dispatcher gathers commits, PRs, diffs, and file context.
 - Synthesizer writes cited explanation sections.

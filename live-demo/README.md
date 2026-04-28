@@ -15,7 +15,7 @@ The step-by-step walkthrough uses one natural-language question: "How does the a
 
 When run in an interactive terminal, the walkthrough pauses after each visible step. Press Enter to move to the next planner/tool/synthesizer/critic step. Add `--no-pause` if you want it to run straight through.
 
-Planner turns show the `Evidence collected so far` section in full without printing the bulky tool schema around it. Critic prompts are shown in full, and the critic step also prints the raw reply or a structured skipped report when Anthropic is unavailable. For a more technical version of the rest of the prompt tracing, add `--verbose-prompts`.
+Planner turns show the `Evidence collected so far` section in full without printing the bulky tool schema around it. Critic prompts are shown in full, and the critic step prints the raw reply plus a structured response panel with `verdict`, `issues`, `focus_hints`, and `reasoning`. If Anthropic is unavailable, that same panel shows the skipped report. For a more technical version of the rest of the prompt tracing, add `--verbose-prompts`.
 
 ## Best Demo Flow
 
