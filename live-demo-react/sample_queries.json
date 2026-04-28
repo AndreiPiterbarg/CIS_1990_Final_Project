@@ -1,0 +1,35 @@
+[
+  {
+    "id": "hooks-use-transition",
+    "title": "React hook dispatcher path: useTransition",
+    "why_good": "Small enough for a live run, but tied to a real public React API whose history usually includes meaningful implementation and release-context commits.",
+    "file_path": "packages/react/src/ReactHooks.js",
+    "anchor": "export function useTransition",
+    "span_before": 0,
+    "span_after": 6,
+    "max_commits": 5,
+    "natural_prompt": "Why does React's useTransition hook delegate through the current dispatcher?"
+  },
+  {
+    "id": "hooks-use-state",
+    "title": "React hook dispatcher path: useState",
+    "why_good": "A familiar public API that lets the demo explain a tiny line range while Git history supplies the real context.",
+    "file_path": "packages/react/src/ReactHooks.js",
+    "anchor": "export function useState",
+    "span_before": 0,
+    "span_after": 5,
+    "max_commits": 5,
+    "natural_prompt": "Why does React's useState hook call the dispatcher instead of implementing state directly?"
+  },
+  {
+    "id": "jsx-runtime",
+    "title": "React JSX runtime export surface",
+    "why_good": "Shows the explainer on a compact package entrypoint whose history is connected to React's public JSX runtime.",
+    "file_path": "packages/react/jsx-runtime.js",
+    "anchor": "export {Fragment, jsx, jsxs} from './src/jsx/ReactJSX';",
+    "span_before": 0,
+    "span_after": 0,
+    "max_commits": 5,
+    "natural_prompt": "Why does React expose Fragment, jsx, and jsxs from the JSX runtime entrypoint?"
+  }
+]
