@@ -22,7 +22,7 @@ Output is a single JSON object containing commits, pull requests, issues, and a 
 
 ## Installation
 
-Create and activate a virtual environment, then install the project dependencies:
+Create and activate a virtual environment, then install the project dependencies from `requirements.txt`:
 
 ```bash
 python3 -m venv .venv
@@ -30,13 +30,9 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Dependencies: `openai>=1.12.0`, `requests>=2.31.0`, `python-dotenv>=1.0.0`, `pytest>=7.4.0`.
-
-The optional `--critic` mode also needs Anthropic's SDK:
-
-```bash
-python -m pip install anthropic
-```
+The requirements file includes the packages used by the core CLI, demo scripts,
+test suite, evaluation harness, chart generation, and optional Anthropic
+critic/judge paths.
 
 The examples below use `python3`. If your activated environment exposes Python as `python`, that is equivalent.
 
@@ -105,7 +101,7 @@ python3 main.py /path/to/repo git_explainer/orchestrator.py \
 | `--max-commits N` | Override the maximum number of commits to trace (default: 5). |
 | `--context-radius N` | Override the lines of surrounding context to fetch (default: 30). |
 | `--planner` | Enable the Planner LLM, which decides which deterministic git/GitHub tools to call instead of using the fixed evidence-collection sequence. Requires LLM mode and is ignored with `--no-llm`. |
-| `--critic` | Enable the Critic LLM, which grades the synthesized explanation against the gathered evidence and may trigger one re-plan/re-synthesis round when `--planner` is also enabled. Requires LLM mode and the optional `anthropic` package plus `ANTHROPIC_API_KEY` or `ANTHROPIC_KEY`; if unavailable, the critic is skipped and the agent still returns a result. |
+| `--critic` | Enable the Critic LLM, which grades the synthesized explanation against the gathered evidence and may trigger one re-plan/re-synthesis round when `--planner` is also enabled. Requires LLM mode plus `ANTHROPIC_API_KEY` or `ANTHROPIC_KEY`; if unavailable, the critic is skipped and the agent still returns a result. |
 
 For example, to run against a local clone without LLM calls or GitHub public-repository validation:
 
