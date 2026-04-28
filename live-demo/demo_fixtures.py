@@ -9,10 +9,28 @@ validation, and critic control flow still run through production code.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 
 WIDTH = 90
+
+COLOR_PROMPT = "\033[36m"  # cyan
+COLOR_REPLY = "\033[33m"   # yellow
+COLOR_RESET = "\033[0m"
+
+
+def _colors_enabled() -> bool:
+    return not os.getenv("NO_COLOR")
+
+
+def pretty_json(text: str) -> str:
+    """Pretty-print a JSON string. If it isn't valid JSON, return as-is."""
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return text
+    return json.dumps(parsed, indent=2, ensure_ascii=False)
 
 
 def hr(char: str = "-") -> None:
@@ -36,10 +54,14 @@ def bullet(label: str, value: str) -> None:
     print(f"   - {label:<22} {value}")
 
 
-def block(label: str, body: str, *, indent: str = "    ") -> None:
+def block(label: str, body: str, *, indent: str = "    ", color: str | None = None) -> None:
     print(f"   [{label}]")
+    use_color = color and _colors_enabled()
     for line in body.rstrip().splitlines():
-        print(f"{indent}{line}")
+        if use_color:
+            print(f"{indent}{color}{line}{COLOR_RESET}")
+        else:
+            print(f"{indent}{line}")
 
 
 def trim(text: str, max_chars: int = 800) -> str:

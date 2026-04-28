@@ -170,7 +170,7 @@ def install_tracing(
         demo.section(f"STEP {step}: {kind} -> Groq llama-3.1-8b-instant")
         show_prompt(kind, prompt, system_prompt=system_prompt)
         reply = scripted_llm.chat(prompt)
-        demo.block(f"{kind} reply", demo.trim(reply, 700))
+        show_reply(f"{kind} reply", reply, max_chars=2500)
         pause_for_enter()
         return reply
 
@@ -186,7 +186,7 @@ def install_tracing(
         step = next_step()
         demo.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (SCRIPTED)")
         show_prompt("CRITIC", prompt)
-        demo.block("critic reply", demo.trim(critic_text, 800))
+        show_reply("critic reply", critic_text, max_chars=2500)
         pause_for_enter()
         return critic_text
 
@@ -195,7 +195,7 @@ def install_tracing(
         demo.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (LIVE)")
         show_prompt("CRITIC", prompt)
         reply = real_anthropic_call(prompt)
-        demo.block("critic reply (LIVE)", demo.trim(reply, 800))
+        show_reply("critic reply (LIVE)", reply, max_chars=2500)
         pause_for_enter()
         return reply
 
@@ -275,10 +275,22 @@ def classify_prompt(prompt: str) -> str:
 def show_prompt(kind: str, prompt: str, *, system_prompt: str = "") -> None:
     if _verbose_prompts:
         if system_prompt:
-            demo.block("system prompt", demo.trim(system_prompt, 2500))
-        demo.block(f"{kind} prompt (verbose)", demo.trim(prompt, 5000))
+            demo.block("system prompt", demo.trim(system_prompt, 2500), color=demo.COLOR_PROMPT)
+        demo.block(
+            f"{kind} prompt (verbose)",
+            demo.trim(prompt, 5000),
+            color=demo.COLOR_PROMPT,
+        )
         return
-    demo.block(f"{kind} prompt (key fragment)", demo.summarize_prompt(prompt, kind))
+    demo.block(
+        f"{kind} prompt (key fragment)",
+        demo.summarize_prompt(prompt, kind),
+        color=demo.COLOR_PROMPT,
+    )
+
+
+def show_reply(label: str, reply: str, *, max_chars: int = 2500) -> None:
+    demo.block(label, demo.trim(demo.pretty_json(reply), max_chars), color=demo.COLOR_REPLY)
 
 
 def next_step() -> int:
