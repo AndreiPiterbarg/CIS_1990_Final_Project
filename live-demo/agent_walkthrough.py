@@ -68,6 +68,16 @@ _step_counter = 0
 _tool_counter = 0
 _pause_between_steps = True
 _verbose_prompts = False
+_synth_attempts = 0
+
+
+def _provider_label() -> str:
+    base = (os.getenv("GROQ_BASE_URL") or "").lower()
+    if "anthropic.com" in base:
+        return "Anthropic"
+    if "groq.com" in base or not base:
+        return "Groq"
+    return "LLM"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -106,8 +116,9 @@ def main(argv: list[str] | None = None) -> int:
         width=WIDTH,
     ))
     print()
+    provider = _provider_label()
     print(textwrap.fill(
-        "Demo mode: planner and synthesizer calls go to the real Groq "
+        f"Demo mode: planner and synthesizer calls go to the real {provider} "
         "OpenAI-compatible endpoint. The critic uses the real Anthropic "
         "path when configured, otherwise production code marks it skipped. "
         "GitHub responses stay on presentation fixtures so the story is "
@@ -116,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     ))
     print()
     print(textwrap.fill(
-        f"Groq model: {config.GROQ_MODEL}. Planner model: {config.PLANNER_MODEL}.",
+        f"Synthesizer model: {config.GROQ_MODEL}. Planner model: {config.PLANNER_MODEL}.",
         width=WIDTH,
     ))
     if should_pause():
@@ -146,10 +157,17 @@ def install_tracing() -> None:
 
     def traced_chat(prompt, *, system_prompt="", history=None,
                     model=None, max_tokens=None, temperature=0.3):
+        global _synth_attempts
         kind = classify_prompt(prompt)
         step = next_step()
         resolved_model = model or config.GROQ_MODEL
-        demo.section(f"STEP {step}: {kind} -> Groq {resolved_model}  (LIVE)")
+        provider = _provider_label()
+        suffix = ""
+        if kind == "SYNTHESIZER":
+            _synth_attempts += 1
+            if _synth_attempts > 1:
+                suffix = f"  [retry #{_synth_attempts - 1}: prior attempt failed JSON/citation validation]"
+        demo.section(f"STEP {step}: {kind} -> {provider} {resolved_model}  (LIVE){suffix}")
         show_prompt(kind, prompt, system_prompt=system_prompt)
         try:
             kwargs = {
@@ -166,7 +184,7 @@ def install_tracing() -> None:
             show_reply(f"{kind} error", repr(exc), max_chars=2500)
             pause_for_enter()
             raise
-        show_reply(f"{kind} reply (LIVE)", reply, max_chars=2500)
+        show_reply(f"{kind} reply (LIVE)", reply, max_chars=None if kind == "PLANNER" else 2500)
         pause_for_enter()
         return reply
 
