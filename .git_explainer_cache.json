@@ -2,9 +2,17 @@
   "commit_prs": {
     "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075": [
       1
-    ]
+    ],
+    "4c711bfc4861f860a0cb2e3b7e78739df5f25339": [],
+    "4e1cc6bec7c6d1b342e63ccb468d0bc55020f70f": [],
+    "628ef3cecd7deeb57b0101f1707b2cb7f724acba": []
   },
-  "contexts": {},
+  "contexts": {
+    "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/config.py:13:20:30": "\"\"\"Configuration helpers for the Git explainer agent.\"\"\"\n\nfrom __future__ import annotations\n\nimport os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# Environment-backed credentials. We keep module import side effects light so\n# tests and offline workflows can still import the package.\nGITHUB_TOKEN = os.getenv(\"GITHUB_TOKEN\", \"\")\nGROQ_API_KEY = os.getenv(\"GROQ_API_KEY\", \"\")\n\n# Groq / OpenAI-compatible endpoint\nGROQ_BASE_URL = os.getenv(\"GROQ_BASE_URL\", \"https://api.groq.com/openai/v1\")\nGROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")\nGROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))\n\n# GitHub API\nGITHUB_API_BASE = os.getenv(\"GITHUB_API_BASE\", \"https://api.github.com\")\n\n# Agent defaults from the PRD\nDEFAULT_MAX_LINE_SPAN = int(os.getenv(\"GIT_EXPLAINER_MAX_LINE_SPAN\", \"200\"))\nDEFAULT_MAX_COMMITS = int(os.getenv(\"GIT_EXPLAINER_MAX_COMMITS\", \"5\"))\nDEFAULT_CONTEXT_RADIUS = int(os.getenv(\"GIT_EXPLAINER_CONTEXT_RADIUS\", \"30\"))\nCACHE_FILENAME = os.getenv(\"GIT_EXPLAINER_CACHE_FILENAME\", \".git_explainer_cache.json\")\n\n\ndef github_headers(*, accept: str = \"application/vnd.github.v3+json\") -> dict[str, str]:\n    \"\"\"Return GitHub headers with the configured token, if any.\"\"\"\n    return {\n        \"Authorization\": f\"token {GITHUB_TOKEN}\",\n        \"Accept\": accept,\n    }\n\n\ndef has_github_token() -> bool:\n    return bool(GITHUB_TOKEN.strip())\n\n\ndef has_groq_api_key() -> bool:\n    return bool(GROQ_API_KEY.strip())\n",
+    "4c711bfc4861f860a0cb2e3b7e78739df5f25339:git_explainer/config.py:13:20:30": "import os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# --- Required (fail fast if missing) ---\nGITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]\nGROQ_API_KEY = os.environ[\"GROQ_API_KEY\"]\n\n# --- Groq API settings (OpenAI-compatible endpoint) ---\nGROQ_BASE_URL = \"https://api.groq.com/openai/v1\"\nGROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")\nGROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))\n\n# --- GitHub API ---\nGITHUB_API_BASE = \"https://api.github.com\"\n",
+    "4e1cc6bec7c6d1b342e63ccb468d0bc55020f70f:live-demo/demo_fixtures.py:121:132:30": "            \"Adds the initial agent skeleton, env-driven config \"\n            \"(replacing hard-coded credentials), and the LLM provider \"\n            \"switch from Kimi to Groq for cost reasons.\"\n        ),\n        \"state\": \"open\",\n        \"merged\": True,\n        \"merged_at\": \"2026-04-14T21:13:26Z\",\n        \"created_at\": \"2026-04-14T05:55:42Z\",\n        \"user\": {\"login\": \"aking526\"},\n        \"base\": {\"ref\": \"master\"},\n        \"head\": {\"ref\": \"agentv1\"},\n        \"merge_commit_sha\": \"6d82e7ee9c8739060c02bb5586379566a27a00f7\",\n    },\n    \"https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/comments\": [],\n    \"https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits/e0f2b80dc00ffa2b5bf063c64f490fe3e53b183e/pulls\": [],\n    \"https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits/50c52bb5e27dc43b87676facc2338d8c0506aa5c/pulls\": [],\n}\n\n\ndef fake_github_get_json(url, *, headers=None, retries=3, memory=None, etag_cache=None):\n    from git_explainer.tools.github_http import GitHubResponse\n\n    if url in _GITHUB_FIXTURES:\n        return GitHubResponse(\n            data=_GITHUB_FIXTURES[url],\n            status_code=200,\n            headers={},\n            from_cache=False,\n        )\n    return GitHubResponse(data=None, status_code=404, headers={}, from_cache=False)\n\n\ndef fake_repo_check(owner: str, repo_name: str) -> dict:\n    return {\"private\": False, \"default_branch\": \"master\"}\n\n\ndef summarize_prompt(prompt: str, kind: str) -> str:\n    \"\"\"Return a short on-screen-friendly excerpt of a long agent prompt.\"\"\"\n    if kind == \"PLANNER\":\n        bits: list[str] = []\n        for line in prompt.splitlines():\n            stripped = line.strip()\n            if stripped.startswith(\"Iteration \"):\n                bits.append(stripped)\n                break\n        if \"Focus hints from the critic\" in prompt:\n            idx = prompt.index(\"Focus hints from the critic\")\n            bits.append(prompt[idx:idx + 600])\n        elif \"Evidence collected so far\" in prompt:\n            idx = prompt.index(\"Evidence collected so far\")\n            end = prompt.find(\"Tool call history\", idx)\n            if end == -1:\n                end = idx + 800\n            bits.append(prompt[idx:min(end, idx + 800)].rstrip())\n        return \"\\n\".join(bits) or trim(prompt, 400)\n\n    if kind == \"SYNTHESIZER\":\n        idx = prompt.find(\"Query:\")\n        if idx == -1:\n            return trim(prompt, 400)\n        end = prompt.find(\"Evidence:\", idx)\n        return prompt[idx:end if end > 0 else idx + 400].rstrip()\n\n    if kind == \"CRITIC\":\n        idx = prompt.find(\"Draft explanation:\")\n        if idx == -1:\n            return trim(prompt, 400)\n        end = prompt.find(\"Evidence available\", idx)\n        return prompt[idx:end if end > 0 else idx + 600].rstrip()\n\n    return trim(prompt, 400)\n\n",
+    "628ef3cecd7deeb57b0101f1707b2cb7f724acba:git_explainer/config.py:13:20:30": "import os\n\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\n# --- Required (fail fast if missing) ---\nGITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]\nKIMI_API_KEY = os.environ[\"KIMI_API_KEY\"]\n\n# --- Kimi API settings ---\nKIMI_BASE_URL = \"https://api.moonshot.cn/v1\"\nKIMI_MODEL = os.getenv(\"KIMI_MODEL\", \"moonshot-v1-8k\")\nKIMI_MAX_TOKENS = int(os.getenv(\"KIMI_MAX_TOKENS\", \"4096\"))\n\n# --- GitHub API ---\nGITHUB_API_BASE = \"https://api.github.com\"\n"
+  },
   "diffs": {
     "3870c344c0ff5b8da56a85dc8a9a896bfa7bb075:git_explainer/config.py": {
       "files": [
@@ -334,6 +342,116 @@
       "total_additions": 34,
       "total_deletions": 7,
       "total_files_changed": 2
+    },
+    "4c711bfc4861f860a0cb2e3b7e78739df5f25339:git_explainer/config.py": {
+      "commit_sha": "4c711bf",
+      "hunks": [
+        {
+          "changes": [
+            "-KIMI_API_KEY = os.environ[\"KIMI_API_KEY\"]",
+            "+GROQ_API_KEY = os.environ[\"GROQ_API_KEY\"]",
+            "-# --- Kimi API settings ---",
+            "-KIMI_BASE_URL = \"https://api.moonshot.cn/v1\"",
+            "-KIMI_MODEL = os.getenv(\"KIMI_MODEL\", \"moonshot-v1-8k\")",
+            "-KIMI_MAX_TOKENS = int(os.getenv(\"KIMI_MAX_TOKENS\", \"4096\"))",
+            "+# --- Groq API settings (OpenAI-compatible endpoint) ---",
+            "+GROQ_BASE_URL = \"https://api.groq.com/openai/v1\"",
+            "+GROQ_MODEL = os.getenv(\"GROQ_MODEL\", \"llama-3.3-70b-versatile\")",
+            "+GROQ_MAX_TOKENS = int(os.getenv(\"GROQ_MAX_TOKENS\", \"4096\"))"
+          ],
+          "header": "@@ -8,8 +8,8 @@ load_dotenv()"
+        }
+      ]
+    },
+    "4e1cc6bec7c6d1b342e63ccb468d0bc55020f70f:live-demo/demo_fixtures.py": {
+      "commit_sha": "4e1cc6b",
+      "hunks": [
+        {
+          "changes": [
+            "+\"\"\"Reusable scripted fixtures for the live demo.",
+            "+",
+            "+These are the useful pieces from the older demo harness: presentation",
+            "+printing helpers, deterministic LLM replies, and canned GitHub responses.",
+            "+The actual planner loop, tool dispatcher, evidence merging, citation",
+            "+validation, and critic control flow still run through production code.",
+            "+\"\"\"",
+            "+",
+            "+from __future__ import annotations",
+            "+",
+            "+import json",
+            "+from typing import Any",
+            "+",
+            "+",
+            "+WIDTH = 90",
+            "+",
+            "+",
+            "+def hr(char: str = \"-\") -> None:",
+            "+    print(char * WIDTH)",
+            "+",
+            "+",
+            "+def title(text: str) -> None:",
+            "+    print()",
+            "+    hr(\"=\")",
+            "+    print(f\"  {text}\")",
+            "+    hr(\"=\")",
+            "+",
+            "+",
+            "+def section(text: str) -> None:",
+            "+    print()",
+            "+    print(f\">>> {text}\")",
+            "+    hr(\"-\")",
+            "+",
+            "+",
+            "+def bullet(label: str, value: str) -> None:",
+            "+    print(f\"   - {label:<22} {value}\")",
+            "+",
+            "+",
+            "+def block(label: str, body: str, *, indent: str = \"    \") -> None:",
+            "+    print(f\"   [{label}]\")",
+            "+    for line in body.rstrip().splitlines():",
+            "+        print(f\"{indent}{line}\")",
+            "+",
+            "+",
+            "+def trim(text: str, max_chars: int = 800) -> str:",
+            "+    if len(text) <= max_chars:",
+            "+        return text",
+            "+    return text[: max_chars - 60] + \"\\n   ... [trimmed for readability] ...\"",
+            "+",
+            "+",
+            "+class ScriptedLLM:",
+            "+    \"\"\"Deterministic two-channel LLM stub for planner and synthesizer turns.\"\"\"",
+            "+",
+            "+    def __init__(self, *, planner: list[str], synth: list[str]):",
+            "+        self._planner = list(planner)",
+            "+        self._synth = list(synth)",
+            "+        self._planner_index = 0",
+            "+        self._synth_index = 0",
+            "+",
+            "+    @staticmethod",
+            "+    def _is_synth(prompt: str) -> bool:",
+            "+        return \"Explain why the selected code exists\" in prompt[:600]",
+            "+",
+            "+    def chat(self, prompt: str, **kwargs) -> str:",
+            "+        if self._is_synth(prompt):",
+            "+            if self._synth_index >= len(self._synth):",
+            "+                return self._synth[-1]",
+            "+            reply = self._synth[self._synth_index]",
+            "+            self._synth_index += 1",
+            "+            return reply",
+            "+",
+            "+        if self._planner_index >= len(self._planner):",
+            "+            raise RuntimeError(",
+            "+                \"ScriptedLLM: out of planner replies. \"",
+            "+                f\"Prompt head: {prompt[:200]!r}\"",
+            "+            )",
+            "+        reply = self._planner[self._planner_index]",
+            "+        self._planner_index += 1",
+            "+        return reply",
+            "+"
+          ],
+          "header": "@@ -0,0 +1,370 @@"
+        }
+      ]
     },
     "50c52bb5e27dc43b87676facc2338d8c0506aa5c:git_explainer/tools/file_context_reader.py": {
       "files": [
@@ -783,6 +901,33 @@
       "total_additions": 69,
       "total_deletions": 0,
       "total_files_changed": 2
+    },
+    "628ef3cecd7deeb57b0101f1707b2cb7f724acba:git_explainer/config.py": {
+      "commit_sha": "628ef3c",
+      "hunks": [
+        {
+          "changes": [
+            "+import os",
+            "+",
+            "+from dotenv import load_dotenv",
+            "+",
+            "+load_dotenv()",
+            "+",
+            "+# --- Required (fail fast if missing) ---",
+            "+GITHUB_TOKEN = os.environ[\"GITHUB_TOKEN\"]",
+            "+KIMI_API_KEY = os.environ[\"KIMI_API_KEY\"]",
+            "+",
+            "+# --- Kimi API settings ---",
+            "+KIMI_BASE_URL = \"https://api.moonshot.cn/v1\"",
+            "+KIMI_MODEL = os.getenv(\"KIMI_MODEL\", \"moonshot-v1-8k\")",
+            "+KIMI_MAX_TOKENS = int(os.getenv(\"KIMI_MAX_TOKENS\", \"4096\"))",
+            "+",
+            "+# --- GitHub API ---",
+            "+GITHUB_API_BASE = \"https://api.github.com\""
+          ],
+          "header": "@@ -0,0 +1,17 @@"
+        }
+      ]
     },
     "e0f2b80dc00ffa2b5bf063c64f490fe3e53b183e:git_explainer/tools/file_context_reader.py": {
       "files": [
@@ -1241,6 +1386,21 @@
       "etag": "W/\"d45e6851993a079c8b0221b6452684ec65c7e7df7420fbbc35bc07149e7358b9\"",
       "last_fetched": 1777154092.527574
     },
+    "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits/4c711bfc4861f860a0cb2e3b7e78739df5f25339/pulls": {
+      "data": [],
+      "etag": "\"0c7432e89cff17466501705db05efb6f70a095e73f43b1c346172542656236a7\"",
+      "last_fetched": 1777409406.900861
+    },
+    "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits/4e1cc6bec7c6d1b342e63ccb468d0bc55020f70f/pulls": {
+      "data": [],
+      "etag": "\"0c7432e89cff17466501705db05efb6f70a095e73f43b1c346172542656236a7\"",
+      "last_fetched": 1777414199.7153668
+    },
+    "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/commits/628ef3cecd7deeb57b0101f1707b2cb7f724acba/pulls": {
+      "data": [],
+      "etag": "\"0c7432e89cff17466501705db05efb6f70a095e73f43b1c346172542656236a7\"",
+      "last_fetched": 1777409407.4373991
+    },
     "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1": {
       "data": {
         "_links": {
@@ -1615,11 +1775,18 @@
       },
       "etag": "W/\"32783e22893b897375e31bf1f9cd52d52888a19b38fb2007da17c7012cd06b9d\"",
       "last_fetched": 1777154093.0462122
+    },
+    "https://api.github.com/repos/AndreiPiterbarg/CIS_1990_Final_Project/pulls/1/comments": {
+      "data": [],
+      "etag": "\"0c7432e89cff17466501705db05efb6f70a095e73f43b1c346172542656236a7\"",
+      "last_fetched": 1777409406.6010618
     }
   },
   "issue_comments": {},
   "issues": {},
-  "pr_comments": {},
+  "pr_comments": {
+    "1": []
+  },
   "prs": {
     "1": {
       "base_branch": "master",
