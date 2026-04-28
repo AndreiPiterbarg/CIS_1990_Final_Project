@@ -1,17 +1,20 @@
 # Prompt Bank
 
-Use these prompts in this order for a clean presentation. The first command is the best live-demo path because it shows the whole agent step by step without relying on external services.
+Use these prompts in this order for a clean presentation. The first command is the best live-demo path because it shows the whole agent step by step with real Groq planner/synthesizer responses while keeping GitHub evidence on stable demo fixtures.
 
 ## 1. Main Step-by-Step Demo
 
 ```bash
-python3 live-demo/run_demo.py scripted --scenario both
+python3 live-demo/run_demo.py live
 ```
 
 What it demonstrates:
 
 - Pauses after each visible step so you can narrate before continuing.
-- Keeps prompts compact by default, with `--verbose-prompts` available for a deeper technical walkthrough.
+- Starts from a single natural-language question instead of hand-picked scenario choices.
+- Displays the original user query before the agent begins.
+- Shows the resolved target in `git_explainer/orchestrator.py` before history tracing continues.
+- Shows each planner turn's evidence section in full, plus the full critic prompt and critic reply or skipped report.
 - Planner chooses deterministic tools instead of directly answering.
 - Tool dispatcher gathers commits, PRs, diffs, and file context.
 - Synthesizer writes cited explanation sections.
@@ -22,22 +25,22 @@ Good thing to say:
 
 > The LLM is not allowed to execute arbitrary commands. It only chooses from a small registry of tested tools, and every tool result becomes auditable evidence.
 
-## 2. Natural-Language Query
+## 2. Deterministic Question Backup
 
 ```bash
-python3 live-demo/run_demo.py safe natural-config
+python3 live-demo/run_demo.py safe agent-recovery-question
 ```
 
 Prompt:
 
 ```text
-Why does config use os.getenv for GROQ_API_KEY and GITHUB_TOKEN instead of requiring API keys at import time?
+How does the agent recover when the first explanation is missing evidence?
 ```
 
 What it demonstrates:
 
 - Users do not need exact line numbers.
-- The question resolver maps terms like `os.getenv`, `GROQ_API_KEY`, and `GITHUB_TOKEN` to `git_explainer/config.py`.
+- The question resolver maps the prompt to the Planner/Critic control flow in `git_explainer/orchestrator.py`.
 - The final JSON includes `resolved_target`, so the mapping is visible.
 
 ## 3. Critic-Friendly Bug-Fix Case
@@ -56,7 +59,7 @@ What it demonstrates:
 
 - Sparse metadata case with no linked PR or issue.
 - The agent still returns useful local evidence from commits and diffs.
-- Good transition into the critic story from the scripted demo.
+- Good transition into the critic story from the step-by-step demo.
 
 ## 4. Small Bug-Fix Backup
 
@@ -93,20 +96,20 @@ What it demonstrates:
 - Small deterministic tools are easier to validate than broad agent powers.
 - The agent can explain helper code, not just application-facing code.
 
-## Optional Live API Prompts
+## Optional Variants
 
-Use this if you have API keys configured and want one real model call in the room:
+The old `--live-critic` flag is still accepted for older commands; the critic is already live whenever Anthropic is configured:
 
 ```bash
-python3 live-demo/run_demo.py scripted --scenario 2 --live-critic
+python3 live-demo/run_demo.py live --live-critic
 ```
 
-Use `--no-pause` on any `scripted` command if you want to generate a complete log without pressing Enter.
+Use `--no-pause` on any `live` command if you want to generate a complete log without pressing Enter.
 
 Use this if someone asks to see more of the actual prompts being sent through the agent:
 
 ```bash
-python3 live-demo/run_demo.py scripted --scenario 1 --verbose-prompts
+python3 live-demo/run_demo.py live --verbose-prompts
 ```
 
 Use this only if you are comfortable with network/rate-limit risk:
@@ -115,4 +118,4 @@ Use this only if you are comfortable with network/rate-limit risk:
 python3 live-demo/run_demo.py agentic config-switch --skip-public-check
 ```
 
-The scripted demo is the one to trust during the presentation. The optional live paths are good for Q&A or a backup recording, not for the core flow.
+Use the `safe` commands when you need deterministic no-API backups. Use the full `agentic` command only when you are comfortable with live GitHub/network/rate-limit risk.

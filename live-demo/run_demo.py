@@ -40,14 +40,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="List curated query presets.")
 
     scripted = sub.add_parser(
-        "scripted",
-        help="Run the reliable step-by-step planner/synthesizer/critic demo.",
+        "live",
+        aliases=["scripted"],
+        help="Run the step-by-step live planner/synthesizer/critic demo.",
     )
-    scripted.add_argument("--scenario", choices=["1", "2", "both"], default="both")
     scripted.add_argument(
         "--live-critic",
         action="store_true",
-        help="Use the real Anthropic critic while keeping planner/synth scripted.",
+        help="Deprecated; the critic is already real when Anthropic is configured.",
     )
     scripted.add_argument(
         "--no-pause",
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     scripted.add_argument(
         "--verbose-prompts",
         action="store_true",
-        help="Show fuller prompt traffic for a more technical walkthrough.",
+        help="Show fuller non-planner/non-critic prompt traffic; planner evidence and critic prompts are always full.",
     )
 
     safe = sub.add_parser(
@@ -93,9 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         return check()
     if args.command == "list":
         return list_queries()
-    if args.command == "scripted":
-        return scripted_demo(
-            args.scenario,
+    if args.command in ("scripted", "live"):
+        return stepwise_live_demo(
             live_critic=args.live_critic,
             pause=not args.no_pause,
             verbose_prompts=args.verbose_prompts,
@@ -115,10 +114,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def demo_env(cache_name: str = "git_explainer_cache.json") -> dict[str, str]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    load_dotenv_if_available()
     env = os.environ.copy()
     env["GIT_EXPLAINER_CACHE_FILENAME"] = str(CACHE_DIR / cache_name)
-    env.setdefault("GROQ_MODEL", "llama-3.1-8b-instant")
-    env.setdefault("PLANNER_MODEL", "llama-3.1-8b-instant")
+    env.setdefault("GROQ_MODEL", "openai/gpt-oss-120b")
+    env.setdefault("PLANNER_MODEL", env["GROQ_MODEL"])
     env.setdefault("GITHUB_RATE_LIMIT_SLEEP_CAP", "5")
     env.setdefault("PYTHONUNBUFFERED", "1")
     return env
@@ -145,8 +145,8 @@ def check() -> int:
     print(f"python:       {sys.executable}")
     print(f"demo cache:   {env['GIT_EXPLAINER_CACHE_FILENAME']}")
     print(f"demo logs:    {LOG_DIR}")
-
-    load_dotenv_if_available()
+    print(f"groq model:   {env['GROQ_MODEL']}")
+    print(f"planner:      {env['PLANNER_MODEL']}")
     print()
     print_key_status("GROQ_API_KEY")
     print_key_status("ANTHROPIC_API_KEY", fallback="ANTHROPIC_KEY")
@@ -155,7 +155,7 @@ def check() -> int:
     print()
     if ok:
         print("Ready. Suggested command:")
-        print("  python3 live-demo/run_demo.py scripted --scenario both")
+        print("  python3 live-demo/run_demo.py live")
         return 0
     print("Setup check failed. Fix missing files before presenting.")
     return 1
@@ -176,15 +176,14 @@ def list_queries() -> int:
     return 0
 
 
-def scripted_demo(
-    scenario: str,
+def stepwise_live_demo(
     *,
     live_critic: bool,
     pause: bool,
     verbose_prompts: bool,
 ) -> int:
-    args = [sys.executable, "live-demo/agent_walkthrough.py", "--scenario", scenario]
-    label = f"scripted-scenario-{scenario}"
+    args = [sys.executable, "live-demo/agent_walkthrough.py"]
+    label = "live-question"
     if live_critic:
         args.append("--live-critic")
         label += "-live-critic"

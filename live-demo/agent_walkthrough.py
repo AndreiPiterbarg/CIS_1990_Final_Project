@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Step-by-step walkthrough for the live-demo folder.
 
-The scripted fixtures live beside this file, while the planner loop,
-dispatcher, evidence merging, citation validation, and critic-control
-flow run through production code.
+The visible prompt/reply/tool-call formatting lives here, while the
+planner, synthesizer, critic, dispatcher, evidence merging, and citation
+validation run through production code.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
+from typing import Any
 
 import demo_fixtures as demo
 
@@ -22,6 +23,8 @@ import demo_fixtures as demo
 DEMO_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DEMO_DIR.parent
 PREFERRED_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
+QUERY_FILE = DEMO_DIR / "sample_queries.json"
+LIVE_DEMO_QUERY_ID = "agent-recovery-question"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
@@ -41,6 +44,7 @@ def reexec_with_venv_if_available() -> None:
 
 reexec_with_venv_if_available()
 
+from git_explainer import config
 import git_explainer.critic as critic_mod
 import git_explainer.guardrails as guardrails
 import git_explainer.llm as llm_mod
@@ -55,7 +59,10 @@ from git_explainer.orchestrator import GitExplainerAgent
 
 
 WIDTH = 90
+_ORIGINAL_CHAT = llm_mod.chat
 _ORIGINAL_DISPATCH = planner_mod.dispatch_tool
+_ORIGINAL_CRITIQUE = critic_mod.critique
+_ORIGINAL_CRITIC_IS_AVAILABLE = critic_mod.is_available
 _ORIGINAL_ANTHROPIC_CALL = critic_mod._call_anthropic_critic
 _step_counter = 0
 _tool_counter = 0
@@ -67,11 +74,10 @@ def main(argv: list[str] | None = None) -> int:
     global _pause_between_steps, _verbose_prompts
 
     parser = argparse.ArgumentParser(description="Step-by-step Git Explainer walkthrough.")
-    parser.add_argument("--scenario", choices=["1", "2", "both"], default="both")
     parser.add_argument(
         "--live-critic",
         action="store_true",
-        help="Use the real Anthropic critic; planner and synthesizer stay scripted.",
+        help="Deprecated; the critic is already real when Anthropic is configured.",
     )
     parser.add_argument(
         "--no-pause",
@@ -81,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verbose-prompts",
         action="store_true",
-        help="Show fuller prompts, including system prompts, instead of compact excerpts.",
+        help="Show fuller non-planner/non-critic prompt traffic; planner evidence and critic prompts are always full.",
     )
     args = parser.parse_args(argv)
     _pause_between_steps = not args.no_pause
@@ -101,10 +107,16 @@ def main(argv: list[str] | None = None) -> int:
     ))
     print()
     print(textwrap.fill(
-        "Demo mode: planner and synthesizer replies are scripted for "
-        "reliability. The git tools, planner loop, dispatcher, evidence "
-        "merging, citation validation, and critic-control flow run through "
-        "the real production code.",
+        "Demo mode: planner and synthesizer calls go to the real Groq "
+        "OpenAI-compatible endpoint. The critic uses the real Anthropic "
+        "path when configured, otherwise production code marks it skipped. "
+        "GitHub responses stay on presentation fixtures so the story is "
+        "stable while the LLM responses are live.",
+        width=WIDTH,
+    ))
+    print()
+    print(textwrap.fill(
+        f"Groq model: {config.GROQ_MODEL}. Planner model: {config.PLANNER_MODEL}.",
         width=WIDTH,
     ))
     if should_pause():
@@ -112,65 +124,49 @@ def main(argv: list[str] | None = None) -> int:
         print("Interactive mode: press Enter after each step to continue.")
     if _verbose_prompts:
         print()
-        print("Verbose prompts: showing fuller prompt traffic for technical narration.")
+        print("Verbose prompts: showing fuller non-planner/non-critic prompt traffic.")
 
-    if args.scenario in ("1", "both"):
-        llm, critic_text = demo.scripts_demo_1()
-        run_scenario(
-            "DEMO 1: config.py:13-19  ('Why these credential lines?')",
-            ExplainerQuery(
-                repo_path=str(PROJECT_ROOT),
-                file_path="git_explainer/config.py",
-                start_line=13,
-                end_line=19,
-                owner="AndreiPiterbarg",
-                repo_name="CIS_1990_Final_Project",
-                max_commits=5,
-            ),
-            llm,
-            critic_text,
-            live_critic=args.live_critic,
-        )
-
-    if args.scenario in ("2", "both"):
-        llm, critic_text = demo.scripts_demo_2()
-        run_scenario(
-            "DEMO 2: file_context_reader.py:59-70  (critic catches a thin claim)",
-            ExplainerQuery(
-                repo_path=str(PROJECT_ROOT),
-                file_path="git_explainer/tools/file_context_reader.py",
-                start_line=59,
-                end_line=70,
-                owner="AndreiPiterbarg",
-                repo_name="CIS_1990_Final_Project",
-                max_commits=5,
-            ),
-            llm,
-            critic_text,
-            live_critic=args.live_critic,
-        )
+    query_preset = load_query_preset(LIVE_DEMO_QUERY_ID)
+    run_scenario(
+        "LIVE QUESTION: critic-guided recovery from thin evidence",
+        query_from_preset(query_preset),
+        user_query=query_preset["question"],
+    )
 
     demo.title("DEMO COMPLETE")
     return 0
 
 
-def install_tracing(
-    scripted_llm: demo.ScriptedLLM,
-    critic_text: str,
-    *,
-    live_critic: bool,
-) -> None:
+def install_tracing() -> None:
+    real_chat = _ORIGINAL_CHAT
     real_dispatch = _ORIGINAL_DISPATCH
+    real_critique = _ORIGINAL_CRITIQUE
+    real_critic_is_available = _ORIGINAL_CRITIC_IS_AVAILABLE
     real_anthropic_call = _ORIGINAL_ANTHROPIC_CALL
 
     def traced_chat(prompt, *, system_prompt="", history=None,
                     model=None, max_tokens=None, temperature=0.3):
         kind = classify_prompt(prompt)
         step = next_step()
-        demo.section(f"STEP {step}: {kind} -> Groq llama-3.1-8b-instant")
+        resolved_model = model or config.GROQ_MODEL
+        demo.section(f"STEP {step}: {kind} -> Groq {resolved_model}  (LIVE)")
         show_prompt(kind, prompt, system_prompt=system_prompt)
-        reply = scripted_llm.chat(prompt)
-        show_reply(f"{kind} reply", reply, max_chars=2500)
+        try:
+            kwargs = {
+                "system_prompt": system_prompt,
+                "history": history,
+                "temperature": temperature,
+            }
+            if model is not None:
+                kwargs["model"] = model
+            if max_tokens is not None:
+                kwargs["max_tokens"] = max_tokens
+            reply = real_chat(prompt, **kwargs)
+        except Exception as exc:  # noqa: BLE001 -- shown before production fallback
+            show_reply(f"{kind} error", repr(exc), max_chars=2500)
+            pause_for_enter()
+            raise
+        show_reply(f"{kind} reply (LIVE)", reply, max_chars=2500)
         pause_for_enter()
         return reply
 
@@ -182,33 +178,70 @@ def install_tracing(
         pause_for_enter()
         return result
 
-    def scripted_critic(prompt: str) -> str:
-        step = next_step()
-        demo.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (SCRIPTED)")
-        show_prompt("CRITIC", prompt)
-        show_reply("critic reply", critic_text, max_chars=2500)
-        pause_for_enter()
-        return critic_text
-
-    def live_critic_call(prompt: str) -> str:
-        step = next_step()
-        demo.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (LIVE)")
-        show_prompt("CRITIC", prompt)
-        reply = real_anthropic_call(prompt)
-        show_reply("critic reply (LIVE)", reply, max_chars=2500)
-        pause_for_enter()
+    def traced_critic_chat(prompt: str) -> str:
+        try:
+            reply = real_anthropic_call(prompt)
+        except Exception as exc:  # noqa: BLE001 -- critique() records this as skipped
+            show_reply("critic error", repr(exc), max_chars=None)
+            raise
+        show_reply("critic reply (LIVE)", reply, max_chars=None)
         return reply
+
+    def traced_critique(
+        *,
+        query_dict,
+        explanation,
+        evidence,
+        chat_fn=None,
+        is_available_fn=None,
+    ):
+        step = next_step()
+        demo.section(f"STEP {step}: CRITIC -> Anthropic {config.CRITIC_MODEL}  (LIVE)")
+        prompt = critic_mod._build_user_prompt(
+            query_dict=query_dict,
+            explanation=explanation,
+            evidence=evidence,
+        )
+        show_prompt("CRITIC", prompt, system_prompt=critic_mod._SYSTEM_PROMPT)
+
+        raw_reply_seen = False
+        base_chat_fn = chat_fn or traced_critic_chat
+
+        def traced_chat_for_critique(prompt_from_critic: str) -> str:
+            nonlocal raw_reply_seen
+            try:
+                reply = base_chat_fn(prompt_from_critic)
+            except Exception as exc:  # noqa: BLE001 -- critique() records this as skipped
+                if base_chat_fn is not traced_critic_chat:
+                    show_reply("critic error", repr(exc), max_chars=None)
+                raise
+            raw_reply_seen = True
+            if base_chat_fn is not traced_critic_chat:
+                show_reply("critic reply", reply, max_chars=None)
+            return reply
+
+        report = real_critique(
+            query_dict=query_dict,
+            explanation=explanation,
+            evidence=evidence,
+            chat_fn=traced_chat_for_critique,
+            is_available_fn=is_available_fn or real_critic_is_available,
+        )
+        if not raw_reply_seen:
+            show_reply(
+                "critic response (skipped)",
+                json.dumps(report.to_dict(), indent=2, sort_keys=True),
+                max_chars=None,
+            )
+        pause_for_enter()
+        return report
 
     llm_mod.chat = traced_chat
     orch.chat = traced_chat
     tool_registry.dispatch_tool = traced_dispatch
     planner_mod.dispatch_tool = traced_dispatch
-
-    if live_critic:
-        critic_mod._call_anthropic_critic = live_critic_call
-    else:
-        critic_mod._call_anthropic_critic = scripted_critic
-        critic_mod.is_available = lambda: True
+    critic_mod._call_anthropic_critic = traced_critic_chat
+    critic_mod.critique = traced_critique
 
     github_http.github_get_json = demo.fake_github_get_json
     github_pr_lookup.github_get_json = demo.fake_github_get_json
@@ -219,10 +252,8 @@ def install_tracing(
 def run_scenario(
     title_text: str,
     query: ExplainerQuery,
-    scripted_llm: demo.ScriptedLLM,
-    critic_text: str,
     *,
-    live_critic: bool,
+    user_query: str,
 ) -> None:
     global _step_counter, _tool_counter
     _step_counter = 0
@@ -230,17 +261,24 @@ def run_scenario(
 
     demo.title(title_text)
     demo.bullet("repo", Path(query.repo_path).name)
-    demo.bullet("file", query.file_path or "<question mode>")
-    demo.bullet("lines", f"{query.start_line}-{query.end_line}")
+    if query.question:
+        demo.bullet("mode", "natural-language question")
+        demo.bullet("file hint", query.file_path or "<none>")
+        demo.bullet("lines", "resolved at runtime")
+    else:
+        demo.bullet("mode", "line range")
+        demo.bullet("file", query.file_path or "<question mode>")
+        demo.bullet("lines", f"{query.start_line}-{query.end_line}")
     demo.bullet("github", f"{query.owner}/{query.repo_name}")
     demo.bullet("flags", "use_llm + use_planner + use_critic")
-    demo.bullet(
-        "LLM mode",
-        "scripted Planner+Synth, " +
-        ("LIVE Anthropic Critic" if live_critic else "scripted Critic"),
+    demo.bullet("LLM mode", "LIVE Planner+Synth; LIVE Critic if configured")
+    demo.block(
+        "original user query",
+        textwrap.fill(user_query, width=WIDTH - 8),
+        indent="     ",
     )
 
-    install_tracing(scripted_llm, critic_text, live_critic=live_critic)
+    install_tracing()
     start = time.time()
     result = GitExplainerAgent(use_llm=True, use_planner=True, use_critic=True).explain(query)
     elapsed = time.time() - start
@@ -264,6 +302,26 @@ def run_scenario(
             print(f"      {line}")
 
 
+def load_query_preset(query_id: str) -> dict[str, Any]:
+    for query in json.loads(QUERY_FILE.read_text(encoding="utf-8")):
+        if query["id"] == query_id:
+            return query
+    raise RuntimeError(f"Missing live-demo query preset: {query_id}")
+
+
+def query_from_preset(query: dict[str, Any]) -> ExplainerQuery:
+    return ExplainerQuery(
+        repo_path=str(PROJECT_ROOT),
+        file_path=query.get("file_path"),
+        start_line=query.get("start_line"),
+        end_line=query.get("end_line"),
+        question=query.get("question"),
+        owner=query["owner"],
+        repo_name=query["repo_name"],
+        max_commits=int(query.get("max_commits", 5)),
+    )
+
+
 def classify_prompt(prompt: str) -> str:
     if "Explain why the selected code exists" in prompt[:600]:
         return "SYNTHESIZER"
@@ -273,6 +331,28 @@ def classify_prompt(prompt: str) -> str:
 
 
 def show_prompt(kind: str, prompt: str, *, system_prompt: str = "") -> None:
+    if kind == "PLANNER":
+        demo.block(
+            "PLANNER prompt (evidence section, full)",
+            planner_evidence_view(prompt),
+            color=demo.COLOR_PROMPT,
+        )
+        return
+
+    if kind == "CRITIC":
+        if system_prompt:
+            demo.block(
+                f"{kind} system prompt (full)",
+                system_prompt,
+                color=demo.COLOR_PROMPT,
+            )
+        demo.block(
+            f"{kind} prompt (full)",
+            prompt,
+            color=demo.COLOR_PROMPT,
+        )
+        return
+
     if _verbose_prompts:
         if system_prompt:
             demo.block("system prompt", demo.trim(system_prompt, 2500), color=demo.COLOR_PROMPT)
@@ -289,8 +369,56 @@ def show_prompt(kind: str, prompt: str, *, system_prompt: str = "") -> None:
     )
 
 
-def show_reply(label: str, reply: str, *, max_chars: int = 2500) -> None:
-    demo.block(label, demo.trim(demo.pretty_json(reply), max_chars), color=demo.COLOR_REPLY)
+def planner_evidence_view(prompt: str) -> str:
+    bits: list[str] = []
+    for line in prompt.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Iteration "):
+            bits.append(stripped)
+            break
+
+    evidence = prompt_section(
+        prompt,
+        "Evidence collected so far:",
+        [
+            "Tool call history (most recent last):",
+            "Focus hints from the critic",
+            "Decide the next action.",
+        ],
+    )
+    if evidence:
+        bits.append(evidence)
+
+    focus_hints = prompt_section(
+        prompt,
+        "Focus hints from the critic",
+        ["Decide the next action."],
+    )
+    if focus_hints:
+        bits.append(focus_hints)
+
+    return "\n\n".join(bits) if bits else demo.summarize_prompt(prompt, "PLANNER")
+
+
+def prompt_section(prompt: str, start_marker: str, stop_markers: list[str]) -> str:
+    start = prompt.find(start_marker)
+    if start == -1:
+        return ""
+
+    stops = [
+        stop
+        for marker in stop_markers
+        if (stop := prompt.find(marker, start + len(start_marker))) != -1
+    ]
+    end = min(stops) if stops else len(prompt)
+    return prompt[start:end].rstrip()
+
+
+def show_reply(label: str, reply: str, *, max_chars: int | None = 2500) -> None:
+    body = demo.pretty_json(reply)
+    if max_chars is not None:
+        body = demo.trim(body, max_chars)
+    demo.block(label, body, color=demo.COLOR_REPLY)
 
 
 def next_step() -> int:

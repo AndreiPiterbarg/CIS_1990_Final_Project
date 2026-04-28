@@ -1,5 +1,21 @@
 [
   {
+    "id": "agent-recovery-question",
+    "kind": "question",
+    "title": "Natural-language question: critic-guided recovery",
+    "why_good": "Main live demo path: starts from a real user question, resolves it to the Planner/Critic orchestration code, and returns a multi-commit history about how the agent recovers from thin evidence.",
+    "file_path": "git_explainer/orchestrator.py",
+    "question": "How does the agent recover when the first explanation is missing evidence?",
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "talk_track": [
+      "Shows question mode before history tracing, so the audience sees the resolved target rather than hand-picked line numbers.",
+      "Surfaces the Planner/Critic loop as the subject of the answer and as the mechanism running the demo.",
+      "Produces several commits and diffs, which makes the final explanation more interesting than a tiny one-commit helper."
+    ]
+  },
+  {
     "id": "config-switch",
     "kind": "line",
     "title": "Config provider switch and env-backed credentials",
@@ -122,4 +138,3 @@
     ]
   }
 ]
-
