@@ -1,0 +1,125 @@
+[
+  {
+    "id": "config-switch",
+    "kind": "line",
+    "title": "Config provider switch and env-backed credentials",
+    "why_good": "Best opening prompt: it has a linked PR, a clear provider switch, and easy-to-explain credentials guardrails.",
+    "file_path": "git_explainer/config.py",
+    "start_line": 13,
+    "end_line": 19,
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "natural_prompt": "Why does config use os.getenv for GROQ_API_KEY and GITHUB_TOKEN instead of requiring API keys at import time?",
+    "talk_track": [
+      "Shows local git history plus GitHub PR enrichment.",
+      "Good place to point out cited claims like [commit:...] and [pr:#1].",
+      "Connects to the design goal: useful offline behavior without hard-coded credentials."
+    ]
+  },
+  {
+    "id": "file-reader-revision-fix",
+    "kind": "line",
+    "title": "_read_from_revision error-handling history",
+    "why_good": "Best critic demo: the first explanation is too thin, the critic asks for surrounding file context, and the re-plan visibly improves the final answer.",
+    "file_path": "git_explainer/tools/file_context_reader.py",
+    "start_line": 59,
+    "end_line": 70,
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "natural_prompt": "Why does _read_from_revision return None when git show fails instead of raising an exception?",
+    "talk_track": [
+      "Shows multiple commits with no PR metadata.",
+      "Good place to explain graceful degradation when history is sparse.",
+      "The critic loop demonstrates agent behavior beyond one-shot retrieval."
+    ]
+  },
+  {
+    "id": "line-range-slice-fix",
+    "kind": "line",
+    "title": "Line range slicing bug fix",
+    "why_good": "Small bug-fix example with a descriptive commit message. Useful as a backup if you need a shorter deterministic run.",
+    "file_path": "git_explainer/tools/file_context_reader.py",
+    "start_line": 38,
+    "end_line": 42,
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "natural_prompt": "Why did the file context reader need a line range slicing fix?",
+    "talk_track": [
+      "Shows a compact bug-fix trace.",
+      "Good backup because the target line range is short and easy to read.",
+      "Highlights why line numbers must be carefully handled in history tools."
+    ]
+  },
+  {
+    "id": "issue-regex",
+    "kind": "line",
+    "title": "Issue-reference regex extraction",
+    "why_good": "Good single-commit example for explaining small deterministic tools inside the agent.",
+    "file_path": "git_explainer/tools/github_issue_lookup.py",
+    "start_line": 12,
+    "end_line": 16,
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "natural_prompt": "Why does the GitHub issue lookup tool use a regex to extract issue references?",
+    "talk_track": [
+      "Shows a narrow tool with a specific contract.",
+      "Good example for discussing controlled tool use instead of arbitrary shell access.",
+      "Useful if you want to emphasize testability."
+    ]
+  },
+  {
+    "id": "guardrail-query-mode",
+    "kind": "line",
+    "title": "Question-mode guardrails",
+    "why_good": "Good for discussing safety: question mode, line validation, path containment, and public-repo checks all meet here.",
+    "file_path": "git_explainer/guardrails.py",
+    "start_line": 41,
+    "end_line": 60,
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "natural_prompt": "Why does validate_query treat question mode differently from line range mode?",
+    "talk_track": [
+      "Shows input validation before any costly work.",
+      "Good for explaining path traversal and span-size guardrails.",
+      "Connects the agent behavior to the assignment's safety requirements."
+    ]
+  },
+  {
+    "id": "natural-config",
+    "kind": "question",
+    "title": "Natural-language query: env-backed config",
+    "why_good": "Best safe natural-language prompt. The resolver can map specific tokens like os.getenv, GROQ_API_KEY, and GITHUB_TOKEN to config.py.",
+    "file_path": "git_explainer/config.py",
+    "question": "Why does config use os.getenv for GROQ_API_KEY and GITHUB_TOKEN instead of requiring API keys at import time?",
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "talk_track": [
+      "Shows the non-LLM question resolver mapping prose to a concrete span.",
+      "Good follow-up after the main demo because it proves users do not need exact line numbers.",
+      "Use the resolved_target field to show how the agent grounded the question."
+    ]
+  },
+  {
+    "id": "natural-file-reader",
+    "kind": "question",
+    "title": "Natural-language query: revision reader behavior",
+    "why_good": "Good question-mode companion to the critic demo. It asks about the same behavior in normal user language.",
+    "file_path": "git_explainer/tools/file_context_reader.py",
+    "question": "Why does _read_from_revision return None when git show fails instead of raising an exception?",
+    "max_commits": 5,
+    "owner": "AndreiPiterbarg",
+    "repo_name": "CIS_1990_Final_Project",
+    "talk_track": [
+      "Shows that the same investigation can start from a question instead of a line span.",
+      "The resolved target previews the code span before history tracing.",
+      "Useful if someone asks how natural-language mode works."
+    ]
+  }
+]
+
