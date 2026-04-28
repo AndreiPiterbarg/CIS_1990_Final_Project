@@ -13,6 +13,8 @@ python3 live-demo/run_demo.py scripted --scenario both
 
 Keep a terminal open at the project root. The scripted walkthrough pauses after each visible step; press Enter when you are ready to continue. If the room network is unstable, use only `scripted` and `safe` commands.
 
+If someone asks what the prompts look like under the hood, run `python3 live-demo/run_demo.py scripted --scenario 1 --verbose-prompts`.
+
 ## Opening
 
 "The agent answers a very specific developer question: why does this code exist? The hard part is that the answer usually lives across local git history, PRs, issues, review comments, and the surrounding code. So the agent is designed to retrieve evidence first, then write a cited explanation."

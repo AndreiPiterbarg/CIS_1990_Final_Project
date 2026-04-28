@@ -11,6 +11,7 @@ python3 live-demo/run_demo.py scripted --scenario both
 What it demonstrates:
 
 - Pauses after each visible step so you can narrate before continuing.
+- Keeps prompts compact by default, with `--verbose-prompts` available for a deeper technical walkthrough.
 - Planner chooses deterministic tools instead of directly answering.
 - Tool dispatcher gathers commits, PRs, diffs, and file context.
 - Synthesizer writes cited explanation sections.
@@ -101,6 +102,12 @@ python3 live-demo/run_demo.py scripted --scenario 2 --live-critic
 ```
 
 Use `--no-pause` on any `scripted` command if you want to generate a complete log without pressing Enter.
+
+Use this if someone asks to see more of the actual prompts being sent through the agent:
+
+```bash
+python3 live-demo/run_demo.py scripted --scenario 1 --verbose-prompts
+```
 
 Use this only if you are comfortable with network/rate-limit risk:
 

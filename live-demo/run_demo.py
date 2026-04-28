@@ -54,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run straight through instead of pausing for Enter between steps.",
     )
+    scripted.add_argument(
+        "--verbose-prompts",
+        action="store_true",
+        help="Show fuller prompt traffic for a more technical walkthrough.",
+    )
 
     safe = sub.add_parser(
         "safe",
@@ -93,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             args.scenario,
             live_critic=args.live_critic,
             pause=not args.no_pause,
+            verbose_prompts=args.verbose_prompts,
         )
     if args.command == "safe":
         return safe_query(args.query_id, show_json=args.json)
@@ -122,8 +128,9 @@ def check() -> int:
     print_header("Demo Setup Check")
     required = [
         PROJECT_ROOT / "main.py",
-        PROJECT_ROOT / "demo_show.py",
         PROJECT_ROOT / "git_explainer" / "orchestrator.py",
+        DEMO_DIR / "demo_fixtures.py",
+        DEMO_DIR / "agent_walkthrough.py",
         QUERY_FILE,
     ]
     ok = True
@@ -169,7 +176,13 @@ def list_queries() -> int:
     return 0
 
 
-def scripted_demo(scenario: str, *, live_critic: bool, pause: bool) -> int:
+def scripted_demo(
+    scenario: str,
+    *,
+    live_critic: bool,
+    pause: bool,
+    verbose_prompts: bool,
+) -> int:
     args = [sys.executable, "live-demo/agent_walkthrough.py", "--scenario", scenario]
     label = f"scripted-scenario-{scenario}"
     if live_critic:
@@ -178,6 +191,9 @@ def scripted_demo(scenario: str, *, live_critic: bool, pause: bool) -> int:
     if not pause:
         args.append("--no-pause")
         label += "-no-pause"
+    if verbose_prompts:
+        args.append("--verbose-prompts")
+        label += "-verbose"
     env = demo_env(cache_name=f"{timestamp()}-{label}.cache.json")
     return tee_subprocess(args, label=label, env=env)
 

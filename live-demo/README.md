@@ -15,6 +15,8 @@ The scripted demo is the safest presentation path. It runs the production planne
 
 When run in an interactive terminal, the scripted walkthrough pauses after each visible step. Press Enter to move to the next planner/tool/synthesizer/critic step. Add `--no-pause` if you want it to run straight through.
 
+For a more technical version of the old demo's prompt tracing, add `--verbose-prompts`. The default view stays compact for live narration.
+
 ## Best Demo Flow
 
 1. Run the setup check:
@@ -33,6 +35,12 @@ Non-pausing version for smoke tests or log generation:
 
 ```bash
 python3 live-demo/run_demo.py scripted --scenario both --no-pause
+```
+
+Verbose technical walkthrough:
+
+```bash
+python3 live-demo/run_demo.py scripted --scenario 1 --verbose-prompts
 ```
 
 3. If you want a real API moment, use only the critic live:
@@ -58,7 +66,8 @@ The full live path uses the real Groq planner/synthesizer and Anthropic critic w
 ## Files
 
 - `run_demo.py`: presentation runner, with cache/log isolation.
-- `agent_walkthrough.py`: corrected step-by-step walkthrough used by `run_demo.py scripted`.
+- `agent_walkthrough.py`: step-by-step walkthrough used by `run_demo.py scripted`.
+- `demo_fixtures.py`: scripted LLM replies, mocked GitHub data, and printing helpers.
 - `sample_queries.json`: curated line-range and natural-language queries.
 - `prompts.md`: prompt bank with what each prompt demonstrates.
 - `presenter_notes.md`: short talk track for a 5-8 minute presentation.

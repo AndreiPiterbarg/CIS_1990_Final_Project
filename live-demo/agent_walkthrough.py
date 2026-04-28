@@ -1,26 +1,46 @@
 #!/usr/bin/env python3
-"""Corrected step-by-step walkthrough for the live-demo folder.
+"""Step-by-step walkthrough for the live-demo folder.
 
-This imports the existing demo fixtures from demo_show.py, but installs
-the tracing patches against the current planner bindings too. That keeps
-the presentation in live-demo while leaving the root demo harness alone.
+The scripted fixtures live beside this file, while the planner loop,
+dispatcher, evidence merging, citation validation, and critic-control
+flow run through production code.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import textwrap
 import time
 from pathlib import Path
 
+import demo_fixtures as demo
+
 
 DEMO_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DEMO_DIR.parent
+PREFERRED_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import demo_show as base
+
+def reexec_with_venv_if_available() -> None:
+    if os.getenv("LIVE_DEMO_NO_REEXEC") == "1":
+        return
+    if not PREFERRED_PYTHON.exists():
+        return
+    venv_root = (PROJECT_ROOT / ".venv").resolve()
+    if Path(sys.prefix).resolve() == venv_root:
+        return
+    os.execv(
+        str(PREFERRED_PYTHON),
+        [str(PREFERRED_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]],
+    )
+
+
+reexec_with_venv_if_available()
+
 import git_explainer.critic as critic_mod
 import git_explainer.guardrails as guardrails
 import git_explainer.llm as llm_mod
@@ -35,13 +55,16 @@ from git_explainer.orchestrator import GitExplainerAgent
 
 
 WIDTH = 90
+_ORIGINAL_DISPATCH = planner_mod.dispatch_tool
+_ORIGINAL_ANTHROPIC_CALL = critic_mod._call_anthropic_critic
 _step_counter = 0
 _tool_counter = 0
 _pause_between_steps = True
+_verbose_prompts = False
 
 
 def main(argv: list[str] | None = None) -> int:
-    global _pause_between_steps
+    global _pause_between_steps, _verbose_prompts
 
     parser = argparse.ArgumentParser(description="Step-by-step Git Explainer walkthrough.")
     parser.add_argument("--scenario", choices=["1", "2", "both"], default="both")
@@ -55,13 +78,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run straight through instead of waiting for Enter between steps.",
     )
+    parser.add_argument(
+        "--verbose-prompts",
+        action="store_true",
+        help="Show fuller prompts, including system prompts, instead of compact excerpts.",
+    )
     args = parser.parse_args(argv)
     _pause_between_steps = not args.no_pause
+    _verbose_prompts = args.verbose_prompts
 
     print()
-    base.hr("#")
+    demo.hr("#")
     print("  GIT HISTORY EXPLAINER -- LIVE CLASS DEMO")
-    base.hr("#")
+    demo.hr("#")
     print()
     print(textwrap.fill(
         "Architecture: the planner chooses deterministic tools, the tool "
@@ -81,9 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     if should_pause():
         print()
         print("Interactive mode: press Enter after each step to continue.")
+    if _verbose_prompts:
+        print()
+        print("Verbose prompts: showing fuller prompt traffic for technical narration.")
 
     if args.scenario in ("1", "both"):
-        llm, critic_text = base._scripts_demo_1()
+        llm, critic_text = demo.scripts_demo_1()
         run_scenario(
             "DEMO 1: config.py:13-19  ('Why these credential lines?')",
             ExplainerQuery(
@@ -101,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.scenario in ("2", "both"):
-        llm, critic_text = base._scripts_demo_2()
+        llm, critic_text = demo.scripts_demo_2()
         run_scenario(
             "DEMO 2: file_context_reader.py:59-70  (critic catches a thin claim)",
             ExplainerQuery(
@@ -118,52 +150,52 @@ def main(argv: list[str] | None = None) -> int:
             live_critic=args.live_critic,
         )
 
-    base.title("DEMO COMPLETE")
+    demo.title("DEMO COMPLETE")
     return 0
 
 
 def install_tracing(
-    scripted_llm: base.ScriptedLLM,
+    scripted_llm: demo.ScriptedLLM,
     critic_text: str,
     *,
     live_critic: bool,
 ) -> None:
-    real_dispatch = planner_mod.dispatch_tool
-    real_anthropic_call = critic_mod._call_anthropic_critic
+    real_dispatch = _ORIGINAL_DISPATCH
+    real_anthropic_call = _ORIGINAL_ANTHROPIC_CALL
 
     def traced_chat(prompt, *, system_prompt="", history=None,
                     model=None, max_tokens=None, temperature=0.3):
         kind = classify_prompt(prompt)
         step = next_step()
-        base.section(f"STEP {step}: {kind} -> Groq llama-3.1-8b-instant")
-        base.block(f"{kind} prompt (key fragment)", base._summarize_prompt(prompt, kind))
+        demo.section(f"STEP {step}: {kind} -> Groq llama-3.1-8b-instant")
+        show_prompt(kind, prompt, system_prompt=system_prompt)
         reply = scripted_llm.chat(prompt)
-        base.block(f"{kind} reply", base.trim(reply, 700))
+        demo.block(f"{kind} reply", demo.trim(reply, 700))
         pause_for_enter()
         return reply
 
     def traced_dispatch(name, arguments, context):
         tool_number = next_tool()
-        base.section(f"  TOOL CALL #{tool_number}: {name}({json.dumps(arguments)})")
+        demo.section(f"  TOOL CALL #{tool_number}: {name}({json.dumps(arguments)})")
         result = real_dispatch(name, arguments, context)
-        base.bullet("result", tool_registry._summarize_result(name, result))
+        demo.bullet("result", tool_registry._summarize_result(name, result))
         pause_for_enter()
         return result
 
     def scripted_critic(prompt: str) -> str:
         step = next_step()
-        base.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (SCRIPTED)")
-        base.block("critic prompt (key fragment)", base._summarize_prompt(prompt, "CRITIC"))
-        base.block("critic reply", base.trim(critic_text, 800))
+        demo.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (SCRIPTED)")
+        show_prompt("CRITIC", prompt)
+        demo.block("critic reply", demo.trim(critic_text, 800))
         pause_for_enter()
         return critic_text
 
     def live_critic_call(prompt: str) -> str:
         step = next_step()
-        base.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (LIVE)")
-        base.block("critic prompt (key fragment)", base._summarize_prompt(prompt, "CRITIC"))
+        demo.section("STEP " + str(step) + ": CRITIC -> Anthropic Claude Haiku 4.5  (LIVE)")
+        show_prompt("CRITIC", prompt)
         reply = real_anthropic_call(prompt)
-        base.block("critic reply (LIVE)", base.trim(reply, 800))
+        demo.block("critic reply (LIVE)", demo.trim(reply, 800))
         pause_for_enter()
         return reply
 
@@ -178,16 +210,16 @@ def install_tracing(
         critic_mod._call_anthropic_critic = scripted_critic
         critic_mod.is_available = lambda: True
 
-    github_http.github_get_json = base._fake_github_get_json
-    github_pr_lookup.github_get_json = base._fake_github_get_json
-    github_issue_lookup.github_get_json = base._fake_github_get_json
-    guardrails.ensure_public_github_repo = base._fake_repo_check
+    github_http.github_get_json = demo.fake_github_get_json
+    github_pr_lookup.github_get_json = demo.fake_github_get_json
+    github_issue_lookup.github_get_json = demo.fake_github_get_json
+    guardrails.ensure_public_github_repo = demo.fake_repo_check
 
 
 def run_scenario(
     title_text: str,
     query: ExplainerQuery,
-    scripted_llm: base.ScriptedLLM,
+    scripted_llm: demo.ScriptedLLM,
     critic_text: str,
     *,
     live_critic: bool,
@@ -196,13 +228,13 @@ def run_scenario(
     _step_counter = 0
     _tool_counter = 0
 
-    base.title(title_text)
-    base.bullet("repo", Path(query.repo_path).name)
-    base.bullet("file", query.file_path or "<question mode>")
-    base.bullet("lines", f"{query.start_line}-{query.end_line}")
-    base.bullet("github", f"{query.owner}/{query.repo_name}")
-    base.bullet("flags", "use_llm + use_planner + use_critic")
-    base.bullet(
+    demo.title(title_text)
+    demo.bullet("repo", Path(query.repo_path).name)
+    demo.bullet("file", query.file_path or "<question mode>")
+    demo.bullet("lines", f"{query.start_line}-{query.end_line}")
+    demo.bullet("github", f"{query.owner}/{query.repo_name}")
+    demo.bullet("flags", "use_llm + use_planner + use_critic")
+    demo.bullet(
         "LLM mode",
         "scripted Planner+Synth, " +
         ("LIVE Anthropic Critic" if live_critic else "scripted Critic"),
@@ -213,18 +245,18 @@ def run_scenario(
     result = GitExplainerAgent(use_llm=True, use_planner=True, use_critic=True).explain(query)
     elapsed = time.time() - start
 
-    base.title("RESULT")
-    base.bullet("elapsed", f"{elapsed:.2f} s")
-    base.bullet("commits found", str(len(result["commits"])))
-    base.bullet("PRs fetched", str(len(result["pull_requests"])))
-    base.bullet("diffs gathered", str(len(result["diffs"])))
-    base.bullet("planner.iters", str(result["planner"]["iterations_used"]) if result.get("planner") else "n/a")
-    base.bullet("planner.halted", result["planner"]["halted_reason"] if result.get("planner") else "n/a")
-    base.bullet("critic.verdict", result["critic"]["verdict"] if result.get("critic") else "n/a")
-    base.bullet("critic.replanned", str(result["critic"].get("replanned", False)) if result.get("critic") else "n/a")
-    base.bullet("used_fallback", str(result["used_fallback"]))
+    demo.title("RESULT")
+    demo.bullet("elapsed", f"{elapsed:.2f} s")
+    demo.bullet("commits found", str(len(result["commits"])))
+    demo.bullet("PRs fetched", str(len(result["pull_requests"])))
+    demo.bullet("diffs gathered", str(len(result["diffs"])))
+    demo.bullet("planner.iters", str(result["planner"]["iterations_used"]) if result.get("planner") else "n/a")
+    demo.bullet("planner.halted", result["planner"]["halted_reason"] if result.get("planner") else "n/a")
+    demo.bullet("critic.verdict", result["critic"]["verdict"] if result.get("critic") else "n/a")
+    demo.bullet("critic.replanned", str(result["critic"].get("replanned", False)) if result.get("critic") else "n/a")
+    demo.bullet("used_fallback", str(result["used_fallback"]))
 
-    base.section("FINAL EXPLANATION")
+    demo.section("FINAL EXPLANATION")
     for key in ("what_changed", "why", "tradeoffs", "limitations", "summary"):
         print(f"\n   ## {key}")
         body = result["explanation"].get(key, "") or "(empty)"
@@ -238,6 +270,15 @@ def classify_prompt(prompt: str) -> str:
     if "Decide the next action" in prompt:
         return "PLANNER"
     return "LLM"
+
+
+def show_prompt(kind: str, prompt: str, *, system_prompt: str = "") -> None:
+    if _verbose_prompts:
+        if system_prompt:
+            demo.block("system prompt", demo.trim(system_prompt, 2500))
+        demo.block(f"{kind} prompt (verbose)", demo.trim(prompt, 5000))
+        return
+    demo.block(f"{kind} prompt (key fragment)", demo.summarize_prompt(prompt, kind))
 
 
 def next_step() -> int:
