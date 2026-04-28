@@ -181,10 +181,10 @@ def install_tracing() -> None:
                 kwargs["max_tokens"] = max_tokens
             reply = real_chat(prompt, **kwargs)
         except Exception as exc:  # noqa: BLE001 -- shown before production fallback
-            show_reply(f"{kind} error", repr(exc), max_chars=2500)
+            show_reply(f"{kind} error", repr(exc))
             pause_for_enter()
             raise
-        show_reply(f"{kind} reply (LIVE)", reply, max_chars=None if kind == "PLANNER" else 2500)
+        show_reply(f"{kind} reply (LIVE)", reply)
         pause_for_enter()
         return reply
 
@@ -200,9 +200,9 @@ def install_tracing() -> None:
         try:
             reply = real_anthropic_call(prompt)
         except Exception as exc:  # noqa: BLE001 -- critique() records this as skipped
-            show_reply("critic error", repr(exc), max_chars=None)
+            show_reply("critic error", repr(exc))
             raise
-        show_reply("critic reply (LIVE)", reply, max_chars=None)
+        show_reply("critic reply (LIVE)", reply)
         return reply
 
     def traced_critique(
@@ -231,11 +231,11 @@ def install_tracing() -> None:
                 reply = base_chat_fn(prompt_from_critic)
             except Exception as exc:  # noqa: BLE001 -- critique() records this as skipped
                 if base_chat_fn is not traced_critic_chat:
-                    show_reply("critic error", repr(exc), max_chars=None)
+                    show_reply("critic error", repr(exc))
                 raise
             raw_reply_seen = True
             if base_chat_fn is not traced_critic_chat:
-                show_reply("critic reply", reply, max_chars=None)
+                show_reply("critic reply", reply)
             return reply
 
         report = real_critique(
@@ -432,10 +432,8 @@ def prompt_section(prompt: str, start_marker: str, stop_markers: list[str]) -> s
     return prompt[start:end].rstrip()
 
 
-def show_reply(label: str, reply: str, *, max_chars: int | None = 2500) -> None:
+def show_reply(label: str, reply: str) -> None:
     body = demo.pretty_json(reply)
-    if max_chars is not None:
-        body = demo.trim(body, max_chars)
     demo.block(label, body, color=demo.COLOR_REPLY)
 
 
@@ -446,7 +444,7 @@ def show_critic_response(label: str, report: Any) -> None:
         payload = report
     else:
         payload = {"response": str(report)}
-    show_reply(label, json.dumps(payload, indent=2, sort_keys=True), max_chars=None)
+    show_reply(label, json.dumps(payload, indent=2, sort_keys=True))
 
 
 def next_step() -> int:
