@@ -117,8 +117,25 @@ def demo_env(cache_name: str = "git_explainer_cache.json") -> dict[str, str]:
     load_dotenv_if_available()
     env = os.environ.copy()
     env["GIT_EXPLAINER_CACHE_FILENAME"] = str(CACHE_DIR / cache_name)
-    env.setdefault("GROQ_MODEL", "openai/gpt-oss-120b")
-    env.setdefault("PLANNER_MODEL", env["GROQ_MODEL"])
+
+    # If an Anthropic key is available, route the planner/synthesizer through
+    # Anthropic's OpenAI-compatible endpoint using Claude Haiku. This avoids
+    # Groq free-tier TPM caps (8k tokens/min) that crash the live demo with
+    # 413 rate-limit errors on larger evidence payloads.
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_KEY")
+    if anthropic_key and not os.getenv("LIVE_DEMO_FORCE_GROQ"):
+        env["GROQ_API_KEY"] = anthropic_key
+        env["GROQ_BASE_URL"] = "https://api.anthropic.com/v1/"
+        env.setdefault("GROQ_MODEL", "claude-haiku-4-5")
+        env.setdefault("PLANNER_MODEL", env["GROQ_MODEL"])
+        # Haiku 4.5 supports much larger outputs than the 4096-token default.
+        # The synthesizer's JSON answer was being truncated, breaking JSON
+        # parsing and forcing the deterministic fallback during the demo.
+        env.setdefault("GROQ_MAX_TOKENS", "16384")
+    else:
+        env.setdefault("GROQ_MODEL", "openai/gpt-oss-120b")
+        env.setdefault("PLANNER_MODEL", env["GROQ_MODEL"])
+
     env.setdefault("GITHUB_RATE_LIMIT_SLEEP_CAP", "5")
     env.setdefault("PYTHONUNBUFFERED", "1")
     return env
