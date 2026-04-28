@@ -266,11 +266,8 @@ The primary success criteria are retrieval recall against hand-authored gold com
 | Latency p50 | — | 0.063s fallback / 0.150s LLM |
 | Latency p95 | — | 1.094s fallback / 0.192s LLM |
 
-The faithfulness rubric is a deterministic proxy, not a human rater; the proposal's 80% target assumed human rating and is not yet measured.
 
 ## 8. User transcripts
-
-The three transcripts below show meaningfully different system behaviors. The full raw stdout for each run is preserved in [docs/transcripts.md](transcripts.md); this section keeps the design document self-contained by including the user command, the important system output fields, and the observed behavior.
 
 ### Transcript 1: Successful line-range query with retrieved evidence
 
@@ -300,7 +297,7 @@ python main.py . git_explainer/guardrails.py 41 60 --no-llm --owner AndreiPiterb
 }
 ```
 
-**Behavior shown.** This is the clean-success path. The agent validates the line range, traces two relevant commits, fetches PR metadata, builds file context and diff evidence, and returns a cited five-section explanation. Because the run uses `--no-llm`, `used_fallback: true` confirms that the deterministic fallback summary produced the final prose.
+**Behavior shown.** This is a clean-success path. The agent validates the line range, traces two relevant commits, fetches PR metadata, builds file context and diff evidence, and returns a cited five-section explanation. Because the run uses `--no-llm`, `used_fallback: true` confirms that the deterministic fallback summary produced the final prose.
 
 ### Transcript 2: Difficult case with multi-commit, ambiguous history
 
@@ -328,7 +325,7 @@ python main.py . git_explainer/config.py 13 19 --no-llm --owner AndreiPiterbarg 
 }
 ```
 
-**Behavior shown.** The selected config lines were touched by multiple commits from different authors: initial configuration, provider migration, and later refactoring. The system does not collapse that evidence into a single unsupported narrative. It cites all three commits, includes the related PR when available, and uses the limitations field to flag that intent may be incomplete when discussion is absent from retrieved metadata.
+**Behavior shown.** The chosen config lines were touched by multiple commits from different authors: initial configuration, provider migration, and later refactoring. The system does not collapse that evidence into a single unsupported narrative. It cites all three commits, includes the related PR when available, and uses the limitations field to flag that intent may be incomplete when discussion is absent from retrieved metadata.
 
 ### Transcript 3: Safety case with adversarial prompt-injection-style input
 
