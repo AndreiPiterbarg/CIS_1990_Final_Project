@@ -2,7 +2,7 @@
 
 CIS 1990 Final Project. Authors: Andrei and Alistair.
 
-Architectural reference for the code in this repository. User-facing usage lives in [README.md](../README.md); eval results and critique live in [eval/testing_metrics.md](../eval/testing_metrics.md).
+To understand how to use the project, see [README.md](../README.md). Eval results and critique are in [eval/testing_metrics.md](../eval/testing_metrics.md).
 
 ## 1. Problem, user, motivation, and scope
 
@@ -103,8 +103,6 @@ flowchart TD
 ```
 
 ## 3. Design rationale by required component
-
-This section makes explicit the design rationale for each required agent component. The sections below do not replace the implementation details elsewhere in this document; they explain why those pieces were chosen and what tradeoffs they carry.
 
 ### Data incorporation
 
